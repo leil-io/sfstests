@@ -70,3 +70,9 @@ increased by using the -w option
 ```bash
 sfstests --workers 50 # Run 50 workers
 ```
+
+## Environment variables
+
+- NUMA_CPUSET: CPU range/set to limit usage on. Useful for NUMA.
+- NUMA_MEM_NODE: What NUMA memory node to use. Has no effect if not a NUMA
+system.
