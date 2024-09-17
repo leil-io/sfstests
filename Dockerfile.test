@@ -13,7 +13,7 @@ RUN --mount=target=/var/lib/apt/lists,type=cache,sharing=locked \
     apt-get install --yes \
         lcov \
         tini build-essential libblkid-dev libboost-filesystem-dev libboost-iostreams-dev libboost-program-options-dev libboost-system-dev libcrcutil-dev libdb-dev libfmt-dev libfuse3-dev libgoogle-perftools-dev libgtest-dev libisal-dev libjudy-dev libpam0g-dev libspdlog-dev libsystemd-dev libthrift-dev libtirpc-dev liburcu-dev libyaml-cpp-dev netcat-openbsd python3-venv uuid-dev zlib1g-dev docbook docbook-xml krb5-user libacl1-dev libcap-dev libcephfs-dev libdbus-1-dev libglusterfs-dev libgssapi-krb5-2 libjemalloc-dev libkrb5-dev libkrb5support0 libnfsidmap-dev libradospp-dev libradosstriper-dev librgw-dev libsqlite3-dev xfslibs-dev \
-        acl asciidoc attr automake bash-completion bc ccache cmake curl dbench debhelper devscripts fakeroot fio fuse3 gcc git gnupg2 kmod lcov make nfs4-acl-tools pkg-config pylint python3-pip python3-setuptools python3-wheel psmisc rsync rsyslog socat sudo tidy time valgrind wget bison byacc ceph dbus doxygen flex tree 
+        acl asciidoc attr automake bash-completion bc ccache cmake curl dbench debhelper devscripts fakeroot fio fuse3 gcc git gnupg2 kmod lcov make nfs4-acl-tools pkg-config pylint python3-pip python3-setuptools python3-wheel psmisc rsync rsyslog socat sudo tidy time valgrind wget bison byacc ceph dbus doxygen flex tree
 
 
 WORKDIR /saunafs
@@ -27,7 +27,7 @@ RUN --mount=target=/var/lib/apt/lists,type=cache,sharing=locked \
     ./tests/setup_machine.sh setup /mnt/hdd_0 /mnt/hdd_1 /mnt/hdd_2 /mnt/hdd_3 /mnt/hdd_4 /mnt/hdd_5 /mnt/hdd_6 /mnt/hdd_7 || true
 
 RUN mkdir -p /mnt/hdd_0/ /mnt/hdd_1/ /mnt/hdd_2/ /mnt/hdd_3/ /mnt/hdd_4/ /mnt/hdd_5/ /mnt/hdd_6/ /mnt/hdd_7/
-RUN chown saunafstest:saunafstest -R /mnt/hdd_* 
+RUN chown saunafstest:saunafstest -R /mnt/hdd_*
 
 ### Build Phase
 FROM test-setup AS test-build

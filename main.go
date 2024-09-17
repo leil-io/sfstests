@@ -39,7 +39,8 @@ type testOptions struct {
 	Source           string
 	TestPattern      string
 	MountPoint       string
-    SkipUpgradeTests bool
+	CoreMount        string
+	SkipUpgradeTests bool
 	AllOutput        bool
 	DeleteContainers bool
 	Multiplier       int
@@ -74,6 +75,8 @@ func init() {
 
 	flag.StringVar(&options.MountPoint, "mount", "", "SaunaFS git repository to mount")
 	flag.StringVar(&options.MountPoint, "m", "", "shorthand for -mount")
+
+	flag.StringVar(&options.CoreMount, "core-mount", "", "Mount place for cores")
 }
 
 const (
@@ -91,6 +94,8 @@ var hostConfig = container.HostConfig{
 				CgroupPermissions: "rwm",
 			},
 		},
+		CpusetCpus: os.Getenv("NUMA_CPUSET"),
+		CpusetMems: os.Getenv("NUMA_MEM_NODE"),
 		Ulimits: []*units.Ulimit{
 			{
 				Name: "core",
@@ -161,9 +166,14 @@ func runTests(ctx context.Context, client *client.Client) int {
 	tests := make([]*Test, 0, len(suite))
 
 	if options.MountPoint != "" {
-		hostConfig.Mounts = []mount.Mount{
-			{Type: mount.TypeBind, Source: options.MountPoint, Target: "/saunafs"},
-		}
+		hostConfig.Mounts = append(hostConfig.Mounts, mount.Mount{
+			Type: mount.TypeBind, Source: options.MountPoint, Target: "/saunafs",
+		})
+	}
+	if options.CoreMount != "" {
+		hostConfig.Mounts = append(hostConfig.Mounts, mount.Mount{
+			Type: mount.TypeBind, Source: options.CoreMount, Target: filepath.Dir(corePattern),
+		})
 	}
 
 	var wg sync.WaitGroup
@@ -395,7 +405,7 @@ func getTestGlobs(ctx context.Context, client *client.Client) map[string][]strin
 	suites := getSuites(ctx, client, name)
 	for suite := range suites {
 		execConfig := types.ExecConfig{
-			Cmd:          []string{"bash", "-c", "ls -1 /saunafs/tests/test_suites/" + suite + "/" + options.TestPattern},
+			Cmd:          []string{"bash", "-c", "ls -1 /saunafs/tests/test_suites/" + suite + "/" + options.TestPattern + ".sh"},
 			AttachStdout: true,
 			AttachStderr: false,
 		}
