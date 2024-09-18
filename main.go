@@ -44,6 +44,7 @@ type testOptions struct {
 	AllOutput        bool
 	DeleteContainers bool
 	Multiplier       int
+	CpuLimit         int
 	CI               bool
 }
 
@@ -60,6 +61,9 @@ func init() {
 
 	flag.IntVar(&options.Workers, "w", runtime.NumCPU(), "shorthand for -workers")
 	flag.IntVar(&options.Workers, "workers", runtime.NumCPU(), "Number of containers to run tests")
+
+	flag.IntVar(&options.CpuLimit, "c", runtime.NumCPU(), "shorthand for -CPU's")
+	flag.IntVar(&options.CpuLimit, "cpus", runtime.NumCPU(), "Limit number of CPU's per container")
 
 	flag.IntVar(&options.Multiplier, "multiplier", 1, "Test timeout multiplier")
 
@@ -103,6 +107,7 @@ var hostConfig = container.HostConfig{
 				Hard: -1,
 			},
 		},
+		CPUCount: int64(options.CpuLimit),
 	},
 	Tmpfs: map[string]string{
 		"/mnt/ramdisk": "rw,mode=1777,size=2g",
