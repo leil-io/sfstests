@@ -247,8 +247,9 @@ func runTest(jobs <-chan *Test, wg *sync.WaitGroup) {
 		log.Println("Running test: " + job.TestSuite + "/" + job.Name + " in container " + job.ContainerName)
 
 		opts := types.ExecStartCheck{}
+		cmd := "rsyslogd; saunafs-tests " + gtestFilter
 		execConfig := types.ExecConfig{
-			Cmd:          []string{"saunafs-tests", gtestFilter, "gtest_color=no"},
+			Cmd:          []string{"bash", "-c", cmd},
 			AttachStdout: true,
 			AttachStderr: true,
 			Env:          []string{"COREDUMP_WATCH=1", fmt.Sprintf("SAUNAFS_TEST_TIMEOUT_MULTIPLIER=%d", options.Multiplier)},
