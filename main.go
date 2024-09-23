@@ -40,11 +40,11 @@ type testOptions struct {
 	TestPattern      string
 	MountPoint       string
 	CoreMount        string
-	SkipUpgradeTests bool
 	AllOutput        bool
 	DeleteContainers bool
 	Multiplier       int
 	CpuLimit         int
+	AuthFile         string
 	CI               bool
 }
 
@@ -75,12 +75,11 @@ func init() {
 	flag.BoolVar(&options.DeleteContainers, "d", false, "shorthand for -d")
 	flag.BoolVar(&options.DeleteContainers, "delete", false, "Delete all containers regardless if they failed or not")
 
-	flag.BoolVar(&options.SkipUpgradeTests, "skip-upgrade", true, "Skip all upgrade tests from all suites")
-
 	flag.StringVar(&options.MountPoint, "mount", "", "SaunaFS git repository to mount")
 	flag.StringVar(&options.MountPoint, "m", "", "shorthand for -mount")
 
 	flag.StringVar(&options.CoreMount, "core-mount", "", "Mount place for cores")
+	flag.StringVar(&options.AuthFile, "auth", "", "APT auth full path for upgrade tests, otherwise upgrades are skipped")
 }
 
 const (
@@ -180,6 +179,11 @@ func runTests(ctx context.Context, client *client.Client) int {
 			Type: mount.TypeBind, Source: options.CoreMount, Target: filepath.Dir(corePattern),
 		})
 	}
+	if options.AuthFile != "" {
+		hostConfig.Mounts = append(hostConfig.Mounts, mount.Mount{
+			Type: mount.TypeBind, Source: options.AuthFile, Target: "/etc/apt/auth.conf.d/",
+		})
+	}
 
 	var wg sync.WaitGroup
 
@@ -189,7 +193,7 @@ func runTests(ctx context.Context, client *client.Client) int {
 	}
 
 	for i, testName := range suite {
-		if options.SkipUpgradeTests && strings.Contains(testName, "test_upgrade") {
+		if options.AuthFile == "" && strings.Contains(testName, "test_upgrade") {
 			log.Printf("Skipping test %s", testName)
 			continue
 		}
