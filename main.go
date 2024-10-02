@@ -247,7 +247,7 @@ func runTest(jobs <-chan *Test, wg *sync.WaitGroup) {
 		log.Println("Running test: " + job.TestSuite + "/" + job.Name + " in container " + job.ContainerName)
 
 		opts := types.ExecStartCheck{}
-		cmd := "rsyslogd; saunafs-tests " + gtestFilter
+		cmd := "touch /var/log/syslog; chown syslog:syslog /var/log/syslog; rsyslogd; saunafs-tests " + gtestFilter
 		execConfig := types.ExecConfig{
 			Cmd:          []string{"bash", "-c", cmd},
 			AttachStdout: true,
