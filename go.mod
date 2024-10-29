@@ -3,7 +3,7 @@ module leil.io/sfstests
 go 1.22.2
 
 require (
-	github.com/docker/docker v26.0.1+incompatible
+	github.com/docker/docker v26.1.5+incompatible
 	github.com/docker/go-units v0.5.0
 )
 
