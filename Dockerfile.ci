@@ -3,9 +3,15 @@ ARG BASE_IMAGE=ubuntu:24.04
 ### Test env phase
 FROM ${BASE_IMAGE} AS test-setup
 
+# Accept build argument for SaunaFS commit hash
+ARG SAUNAFS_COMMIT_HASH
+
 ENV LC_ALL="C.UTF-8"
 ENV GTEST_ROOT=/usr/local
 ENV DEBIAN_FRONTEND=noninteractive
+
+# Set environment variable for commit hash
+ENV SAUNAFS_COMMIT_HASH="${SAUNAFS_COMMIT_HASH}"
 
 RUN --mount=target=/var/lib/apt/lists,type=cache,sharing=locked \
     --mount=target=/var/cache/apt,type=cache,sharing=locked \
