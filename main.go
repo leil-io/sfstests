@@ -45,14 +45,13 @@ type testOptions struct {
 	Multiplier       int
 	CpuLimit         int
 	AuthFile         string
+	SetCorePattern   bool
 	CI               bool
 }
 
 var options testOptions
 
-var originalCorePattern string = ""
-
-func init() {
+func (*testOptions) setup() {
 	flag.StringVar(&options.Suite, "suite", "SanityChecks", "Test suite to run")
 	flag.StringVar(&options.Suite, "s", "SanityChecks", "shorthand for -suite")
 
@@ -80,6 +79,10 @@ func init() {
 
 	flag.StringVar(&options.CoreMount, "core-mount", "", "Mount place for cores")
 	flag.StringVar(&options.AuthFile, "auth", "", "APT auth full path for upgrade tests, otherwise upgrades are skipped")
+
+	flag.BoolVar(&options.SetCorePattern, "setcore", false, "(EXPERIMENTAL): Manage the core pattern, note if the program is killed or otherwise forced to exit without cleaning up, you need to set it back yourself")
+
+	flag.Parse()
 }
 
 const (
@@ -88,71 +91,107 @@ const (
 	corePattern = "/tmp/temp-cores/core-%e-%p-%t"
 )
 
-var hostConfig = container.HostConfig{
-	Resources: container.Resources{
-		Devices: []container.DeviceMapping{
-			{
-				PathOnHost:        "/dev/fuse",
-				PathInContainer:   "/dev/fuse",
-				CgroupPermissions: "rwm",
+func getDefaultHostConfig() container.HostConfig {
+	return container.HostConfig{
+		Resources: container.Resources{
+			Devices: []container.DeviceMapping{
+				{
+					PathOnHost:        "/dev/fuse",
+					PathInContainer:   "/dev/fuse",
+					CgroupPermissions: "rwm",
+				},
 			},
-		},
-		CpusetCpus: os.Getenv("NUMA_CPUSET"),
-		CpusetMems: os.Getenv("NUMA_MEM_NODE"),
-		Ulimits: []*units.Ulimit{
-			{
-				Name: "core",
-				Soft: -1,
-				Hard: -1,
+			CpusetCpus: os.Getenv("NUMA_CPUSET"),
+			CpusetMems: os.Getenv("NUMA_MEM_NODE"),
+			Ulimits: []*units.Ulimit{
+				{
+					Name: "core",
+					Soft: -1,
+					Hard: -1,
+				},
 			},
+			CPUCount: int64(options.CpuLimit),
 		},
-		CPUCount: int64(options.CpuLimit),
-	},
-	Tmpfs: map[string]string{
-		"/mnt/ramdisk": "rw,mode=1777,size=2g",
-	},
-	Privileged: true,
-	CapAdd:     []string{"SYS_ADMIN", "SYS_PTRACE", "NET_ADMIN"},
-}
-
-func main() {
-	flag.Parse()
-	// Signal handling, so we cleanup properly
-	ctx, cancel := context.WithCancel(context.Background())
-	interrupt := make(chan os.Signal, 1)
-	signal.Notify(interrupt, os.Interrupt)
-	go func() {
-		<-interrupt
-		log.Printf("\nStopping tests, please wait...\n")
-		log.SetOutput(io.Discard)
-		cancel()
-	}()
-
-	if options.CI {
-		hostConfig.Privileged = false
+		Tmpfs: map[string]string{
+			"/mnt/ramdisk": "rw,mode=1777,size=2g",
+		},
+		Privileged: true,
+		CapAdd:     []string{"SYS_ADMIN", "SYS_PTRACE", "NET_ADMIN"},
 	}
 
-	client, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
-	panicIfErr(err)
-	defer client.Close()
-
-	os.Exit(runTests(ctx, client))
 }
 
 type Test struct {
 	Name          string
 	TestSuite     string
 	Ctx           context.Context
-	Client        *client.Client
+	Config        DockerConfig
 	ContainerName string
 	Success       bool
 	TestOutput    []byte
 }
 
-func runTests(ctx context.Context, client *client.Client) int {
+type DockerConfig struct {
+	containerConfig     container.HostConfig
+	testContainerEnvs   []string
+	dockerClient        *client.Client
+	originalCorePattern string
+}
+
+func (cfg *DockerConfig) cleanUp() {
+	cfg.dockerClient.Close()
+
+}
+
+func setupDockerConfig(options testOptions) DockerConfig {
+	var config DockerConfig
+	var err error
+
+	if options.CI {
+		config.containerConfig.Privileged = false
+	}
+	config.containerConfig = setupMounts(options, config.containerConfig)
+	config.dockerClient, err = client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	panicIfErr(err)
+	config.testContainerEnvs = setupTestEnvVariables(options)
+
+	return config
+}
+
+func setupMounts(options testOptions, config container.HostConfig) container.HostConfig {
+	if options.MountPoint != "" {
+		config.Mounts = append(config.Mounts, mount.Mount{
+			Type: mount.TypeBind, Source: options.MountPoint, Target: "/saunafs",
+		})
+	}
+	if options.CoreMount != "" {
+		config.Mounts = append(config.Mounts, mount.Mount{
+			Type: mount.TypeBind, Source: options.CoreMount, Target: filepath.Dir(corePattern),
+		})
+	}
+	if options.AuthFile != "" {
+		config.Mounts = append(config.Mounts, mount.Mount{
+			Type: mount.TypeBind, Source: options.AuthFile, Target: "/etc/apt/auth.conf.d/",
+		})
+	}
+	return config
+}
+
+// Setup environment variables to use in the container
+func setupTestEnvVariables(options testOptions) []string {
+	var envVariables []string
+	if (options.SetCorePattern) {
+		envVariables = append(envVariables, "COREDUMP_WATCH=1")
+	}
+	multiplerVar := fmt.Sprintf("SAUNAFS_TEST_TIMEOUT_MULTIPLIER=%d", options.Multiplier)
+	envVariables = append(envVariables, multiplerVar)
+	return envVariables
+}
+
+func runTests(ctx context.Context, config DockerConfig) int {
 	// This ctx will never be cancelled, good for cleanup
 	alwaysCtx := context.Background()
-	testNames := getTestGlobs(ctx, client)
+	testNames := getTestGlobs(ctx, config.dockerClient)
 	suite, ok := testNames[options.Suite]
 	if !ok {
 		fmt.Fprintf(os.Stderr, "Test suite %s not found, these suites are available:\n", options.Suite)
@@ -161,29 +200,14 @@ func runTests(ctx context.Context, client *client.Client) int {
 		}
 		return 3
 	}
+
 	originalBytes, err := os.ReadFile("/proc/sys/kernel/core_pattern")
 	panicIfErr(err)
-	originalCorePattern = string(originalBytes)
-	setCorePattern(corePattern, alwaysCtx, client)
-	defer setCorePattern(originalCorePattern, alwaysCtx, client)
+	config.originalCorePattern = string(originalBytes)
+	setCorePattern(corePattern, alwaysCtx, config.dockerClient)
+	defer setCorePattern(config.originalCorePattern, alwaysCtx, config.dockerClient)
 	jobs := make(chan *Test, len(suite))
 	tests := make([]*Test, 0, len(suite))
-
-	if options.MountPoint != "" {
-		hostConfig.Mounts = append(hostConfig.Mounts, mount.Mount{
-			Type: mount.TypeBind, Source: options.MountPoint, Target: "/saunafs",
-		})
-	}
-	if options.CoreMount != "" {
-		hostConfig.Mounts = append(hostConfig.Mounts, mount.Mount{
-			Type: mount.TypeBind, Source: options.CoreMount, Target: filepath.Dir(corePattern),
-		})
-	}
-	if options.AuthFile != "" {
-		hostConfig.Mounts = append(hostConfig.Mounts, mount.Mount{
-			Type: mount.TypeBind, Source: options.AuthFile, Target: "/etc/apt/auth.conf.d/",
-		})
-	}
 
 	var wg sync.WaitGroup
 
@@ -201,7 +225,7 @@ func runTests(ctx context.Context, client *client.Client) int {
 			Name:          testName,
 			TestSuite:     options.Suite,
 			Ctx:           ctx,
-			Client:        client,
+			Config:        config,
 			ContainerName: "sfs-test-" + strconv.Itoa(i+1),
 		}
 		jobs <- test
@@ -214,8 +238,12 @@ func runTests(ctx context.Context, client *client.Client) int {
 	}
 	log.Println("All tests finished")
 
+	return printTestResults(tests)
+}
+
+// Print results of tests and return 1 if at least one test failed, otherwise 0
+func printTestResults(tests []*Test) int {
 	exitCode := 0
-	// Go through the tests twice, to keep things ordered.
 	for _, test := range tests {
 		if test.Success {
 			fmt.Printf("TEST %s: OK\n", test.Name)
@@ -226,6 +254,7 @@ func runTests(ctx context.Context, client *client.Client) int {
 			}
 		}
 	}
+	// Go through the tests twice, to keep things ordered.
 	for _, test := range tests {
 		if !test.Success {
 			fmt.Printf("TEST %s: FAILED\n", test.Name)
@@ -243,28 +272,28 @@ func runTest(jobs <-chan *Test, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	for job := range jobs {
-		filter := fmt.Sprintf("%s.%s", job.TestSuite, job.Name)
-		gtestFilter := fmt.Sprintf("--gtest_filter=%s", filter)
 		var output bytes.Buffer
 
-		setupContainer(job.ContainerName, job.Client, job.Ctx)
+		setupContainer(job.ContainerName, job.Config.dockerClient, job.Ctx)
 		log.Println("Running test: " + job.TestSuite + "/" + job.Name + " in container " + job.ContainerName)
 
-		opts := types.ExecStartCheck{}
+		filter := fmt.Sprintf("%s.%s", job.TestSuite, job.Name)
+		gtestFilter := fmt.Sprintf("--gtest_filter=%s", filter)
 		cmd := "touch /var/log/syslog; chown syslog:syslog /var/log/syslog; rsyslogd; saunafs-tests " + gtestFilter
+
 		execConfig := types.ExecConfig{
 			Cmd:          []string{"bash", "-c", cmd},
 			AttachStdout: true,
 			AttachStderr: true,
-			Env:          []string{"COREDUMP_WATCH=1", fmt.Sprintf("SAUNAFS_TEST_TIMEOUT_MULTIPLIER=%d", options.Multiplier)},
+			Env:          job.Config.testContainerEnvs,
 		}
-		resp, err := job.Client.ContainerExecCreate(job.Ctx, job.ContainerName, execConfig)
+		resp, err := job.Config.dockerClient.ContainerExecCreate(job.Ctx, job.ContainerName, execConfig)
 		if errdefs.IsCancelled(err) {
 			return
 		}
 		panicIfErr(err)
 
-		attachResp, err := job.Client.ContainerExecAttach(job.Ctx, resp.ID, opts)
+		attachResp, err := job.Config.dockerClient.ContainerExecAttach(job.Ctx, resp.ID, types.ExecStartCheck{})
 		if errdefs.IsCancelled(err) {
 			return
 		}
@@ -280,12 +309,12 @@ func runTest(jobs <-chan *Test, wg *sync.WaitGroup) {
 			job.Success = false
 			job.TestOutput = output.Bytes()
 			if options.DeleteContainers {
-				cleanContainer(job.Ctx, job.Client, job.ContainerName)
+				cleanContainer(job.Ctx, job.Config.dockerClient, job.ContainerName)
 			}
 		} else {
 			log.Printf("Test %s finished: OK", job.Name)
 			job.Success = true
-			cleanContainer(job.Ctx, job.Client, job.ContainerName)
+			cleanContainer(job.Ctx, job.Config.dockerClient, job.ContainerName)
 			if options.AllOutput {
 				job.TestOutput = output.Bytes()
 			}
@@ -314,7 +343,7 @@ func setupContainer(name string, client *client.Client, ctx context.Context) {
 			Tty:   true,
 			Env:   []string{"TERM=xterm" /* , "DEBUG=1", "DEBUG_LEVEL=5" */},
 		},
-		&hostConfig,
+		&container.HostConfig{},
 		nil,
 		nil,
 		name,
@@ -410,7 +439,7 @@ func getSuites(ctx context.Context, client *client.Client, containerName string)
 func getTestGlobs(ctx context.Context, client *client.Client) map[string][]string {
 	const name string = "sfs-tmp"
 	setupContainer(name, client, ctx)
-	defer cleanContainer(ctx, client, "sfs-tmp")
+	defer cleanContainer(ctx, client, name)
 
 	suites := getSuites(ctx, client, name)
 	for suite := range suites {
@@ -438,6 +467,22 @@ func getTestGlobs(ctx context.Context, client *client.Client) map[string][]strin
 			suites[suite] = append(suites[suite], test)
 		}
 	}
-
 	return suites
+}
+
+func main() {
+	options.setup()
+	// Signal handling, so we cleanup properly
+	ctx, cancel := context.WithCancel(context.Background())
+	interrupt := make(chan os.Signal, 1)
+	signal.Notify(interrupt, os.Interrupt)
+	go func() {
+		<-interrupt
+		log.Printf("\nStopping tests, please wait...\n")
+		log.SetOutput(io.Discard)
+		cancel()
+	}()
+	config := setupDockerConfig(options)
+
+	os.Exit(runTests(ctx, config))
 }
