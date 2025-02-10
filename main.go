@@ -1,197 +1,45 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"flag"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"os/signal"
-	"path/filepath"
-	"reflect"
-	"runtime"
-	"strconv"
 	"strings"
 	"sync"
-	"time"
 
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
-	"github.com/docker/docker/errdefs"
-	"github.com/docker/docker/pkg/stdcopy"
-	"github.com/docker/go-units"
+	"leil.io/sfstests/internal/runner"
+	"leil.io/sfstests/internal/runners/docker"
+	"leil.io/sfstests/internal/utils"
 )
-
-func panicIfErr(e error) {
-	if e != nil {
-		fmt.Fprintf(os.Stderr, "error type: %s\n", reflect.TypeOf(e))
-		panic(e)
-	}
-}
-
-type testOptions struct {
-	Workers          int
-	Suite            string
-	Source           string
-	TestPattern      string
-	MountPoint       string
-	CoreMount        string
-	AllOutput        bool
-	DeleteContainers bool
-	Multiplier       int
-	CpuLimit         int
-	AuthFile         string
-	SetCorePattern   bool
-	CI               bool
-}
-
-var options testOptions
-
-func (*testOptions) setup() {
-	flag.StringVar(&options.Suite, "suite", "SanityChecks", "Test suite to run")
-	flag.StringVar(&options.Suite, "s", "SanityChecks", "shorthand for -suite")
-
-	flag.StringVar(&options.TestPattern, "test", "*", "Test pattern to run")
-	flag.StringVar(&options.TestPattern, "t", "*", "shorthand for -test")
-
-	flag.IntVar(&options.Workers, "w", runtime.NumCPU(), "shorthand for -workers")
-	flag.IntVar(&options.Workers, "workers", runtime.NumCPU(), "Number of containers to run tests")
-
-	flag.IntVar(&options.CpuLimit, "c", runtime.NumCPU(), "shorthand for -CPU's")
-	flag.IntVar(&options.CpuLimit, "cpus", runtime.NumCPU(), "Limit number of CPU's per container")
-
-	flag.IntVar(&options.Multiplier, "multiplier", 1, "Test timeout multiplier")
-
-	flag.BoolVar(&options.AllOutput, "a", false, "shorthand for -all")
-	flag.BoolVar(&options.AllOutput, "all", false, "Output all test results, including succeeding")
-
-	flag.BoolVar(&options.AllOutput, "ci", false, "Run in CI mode (disable privileged modes and enhance security")
-
-	flag.BoolVar(&options.DeleteContainers, "d", false, "shorthand for -d")
-	flag.BoolVar(&options.DeleteContainers, "delete", false, "Delete all containers regardless if they failed or not")
-
-	flag.StringVar(&options.MountPoint, "mount", "", "SaunaFS git repository to mount")
-	flag.StringVar(&options.MountPoint, "m", "", "shorthand for -mount")
-
-	flag.StringVar(&options.CoreMount, "core-mount", "", "Mount place for cores")
-	flag.StringVar(&options.AuthFile, "auth", "", "APT auth full path for upgrade tests, otherwise upgrades are skipped")
-
-	flag.BoolVar(&options.SetCorePattern, "setcore", false, "(EXPERIMENTAL): Manage the core pattern, note if the program is killed or otherwise forced to exit without cleaning up, you need to set it back yourself")
-
-	flag.Parse()
-}
 
 const (
-	sourceDir   = "/opt/saunafs" // Set your source directory path here
-	imageName   = "saunafs-test"
 	corePattern = "/tmp/temp-cores/core-%e-%p-%t"
 )
-
-func getDefaultHostConfig() container.HostConfig {
-	return container.HostConfig{
-		Resources: container.Resources{
-			Devices: []container.DeviceMapping{
-				{
-					PathOnHost:        "/dev/fuse",
-					PathInContainer:   "/dev/fuse",
-					CgroupPermissions: "rwm",
-				},
-			},
-			CpusetCpus: os.Getenv("NUMA_CPUSET"),
-			CpusetMems: os.Getenv("NUMA_MEM_NODE"),
-			Ulimits: []*units.Ulimit{
-				{
-					Name: "core",
-					Soft: -1,
-					Hard: -1,
-				},
-			},
-			CPUCount: int64(options.CpuLimit),
-		},
-		Tmpfs: map[string]string{
-			"/mnt/ramdisk": "rw,mode=1777,size=2g",
-		},
-		Privileged: true,
-		CapAdd:     []string{"SYS_ADMIN", "SYS_PTRACE", "NET_ADMIN"},
-	}
-
-}
 
 type Test struct {
 	Name          string
 	TestSuite     string
 	Ctx           context.Context
-	Config        DockerConfig
-	ContainerName string
+	Runner        runner.Runner
 	Success       bool
-	TestOutput    []byte
+	TestOutput    string
 }
 
-type DockerConfig struct {
+type Config struct {
 	containerConfig     container.HostConfig
 	testContainerEnvs   []string
 	dockerClient        *client.Client
 	originalCorePattern string
 }
 
-func (cfg *DockerConfig) cleanUp() {
-	cfg.dockerClient.Close()
-
-}
-
-func setupDockerConfig(options testOptions) DockerConfig {
-	var config DockerConfig
-	var err error
-
-	if options.CI {
-		config.containerConfig.Privileged = false
-	}
-	config.containerConfig = setupMounts(options, config.containerConfig)
-	config.dockerClient, err = client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
-	panicIfErr(err)
-	config.testContainerEnvs = setupTestEnvVariables(options)
-
-	return config
-}
-
-func setupMounts(options testOptions, config container.HostConfig) container.HostConfig {
-	if options.MountPoint != "" {
-		config.Mounts = append(config.Mounts, mount.Mount{
-			Type: mount.TypeBind, Source: options.MountPoint, Target: "/saunafs",
-		})
-	}
-	if options.CoreMount != "" {
-		config.Mounts = append(config.Mounts, mount.Mount{
-			Type: mount.TypeBind, Source: options.CoreMount, Target: filepath.Dir(corePattern),
-		})
-	}
-	if options.AuthFile != "" {
-		config.Mounts = append(config.Mounts, mount.Mount{
-			Type: mount.TypeBind, Source: options.AuthFile, Target: "/etc/apt/auth.conf.d/",
-		})
-	}
-	return config
-}
-
-// Setup environment variables to use in the container
-func setupTestEnvVariables(options testOptions) []string {
-	var envVariables []string
-	if (options.SetCorePattern) {
-		envVariables = append(envVariables, "COREDUMP_WATCH=1")
-	}
-	multiplerVar := fmt.Sprintf("SAUNAFS_TEST_TIMEOUT_MULTIPLIER=%d", options.Multiplier)
-	envVariables = append(envVariables, multiplerVar)
-	return envVariables
-}
-
-func runTests(ctx context.Context, config DockerConfig) int {
-	// This ctx will never be cancelled, good for cleanup
-	alwaysCtx := context.Background()
-	testNames := getTestGlobs(ctx, config.dockerClient)
+func runTests(ctx context.Context, options utils.TestOptions, runner runner.Runner) int {
+	runner.Setup(options, ctx)
+	testNames := runner.GetTests(options.TestPattern)
 	suite, ok := testNames[options.Suite]
 	if !ok {
 		fmt.Fprintf(os.Stderr, "Test suite %s not found, these suites are available:\n", options.Suite)
@@ -201,11 +49,6 @@ func runTests(ctx context.Context, config DockerConfig) int {
 		return 3
 	}
 
-	originalBytes, err := os.ReadFile("/proc/sys/kernel/core_pattern")
-	panicIfErr(err)
-	config.originalCorePattern = string(originalBytes)
-	setCorePattern(corePattern, alwaysCtx, config.dockerClient)
-	defer setCorePattern(config.originalCorePattern, alwaysCtx, config.dockerClient)
 	jobs := make(chan *Test, len(suite))
 	tests := make([]*Test, 0, len(suite))
 
@@ -213,10 +56,10 @@ func runTests(ctx context.Context, config DockerConfig) int {
 
 	for range options.Workers {
 		wg.Add(1)
-		go runTest(jobs, &wg)
+		go runTest(jobs, &wg, options)
 	}
 
-	for i, testName := range suite {
+	for _, testName := range suite {
 		if options.AuthFile == "" && strings.Contains(testName, "test_upgrade") {
 			log.Printf("Skipping test %s", testName)
 			continue
@@ -225,8 +68,7 @@ func runTests(ctx context.Context, config DockerConfig) int {
 			Name:          testName,
 			TestSuite:     options.Suite,
 			Ctx:           ctx,
-			Config:        config,
-			ContainerName: "sfs-test-" + strconv.Itoa(i+1),
+			Runner:        runner,
 		}
 		jobs <- test
 		tests = append(tests, test)
@@ -238,11 +80,11 @@ func runTests(ctx context.Context, config DockerConfig) int {
 	}
 	log.Println("All tests finished")
 
-	return printTestResults(tests)
+	return printTestResults(tests, options)
 }
 
 // Print results of tests and return 1 if at least one test failed, otherwise 0
-func printTestResults(tests []*Test) int {
+func printTestResults(tests []*Test, options utils.TestOptions) int {
 	exitCode := 0
 	for _, test := range tests {
 		if test.Success {
@@ -258,7 +100,6 @@ func printTestResults(tests []*Test) int {
 	for _, test := range tests {
 		if !test.Success {
 			fmt.Printf("TEST %s: FAILED\n", test.Name)
-			fmt.Printf("FAILED IN CONTAINER %s\n", test.ContainerName)
 			fmt.Printf("- %s OUTPUT -\n", test.Name)
 			fmt.Printf("%s\n", string(test.TestOutput))
 			fmt.Printf("- END OUTPUT -\n")
@@ -268,210 +109,28 @@ func printTestResults(tests []*Test) int {
 	return exitCode
 }
 
-func runTest(jobs <-chan *Test, wg *sync.WaitGroup) {
+func runTest(jobs <-chan *Test, wg *sync.WaitGroup, options utils.TestOptions) {
 	defer wg.Done()
 
 	for job := range jobs {
-		var output bytes.Buffer
-
-		setupContainer(job.ContainerName, job.Config.dockerClient, job.Ctx)
-		log.Println("Running test: " + job.TestSuite + "/" + job.Name + " in container " + job.ContainerName)
-
-		filter := fmt.Sprintf("%s.%s", job.TestSuite, job.Name)
-		gtestFilter := fmt.Sprintf("--gtest_filter=%s", filter)
-		cmd := "touch /var/log/syslog; chown syslog:syslog /var/log/syslog; rsyslogd; saunafs-tests " + gtestFilter
-
-		execConfig := types.ExecConfig{
-			Cmd:          []string{"bash", "-c", cmd},
-			AttachStdout: true,
-			AttachStderr: true,
-			Env:          job.Config.testContainerEnvs,
-		}
-		resp, err := job.Config.dockerClient.ContainerExecCreate(job.Ctx, job.ContainerName, execConfig)
-		if errdefs.IsCancelled(err) {
-			return
-		}
-		panicIfErr(err)
-
-		attachResp, err := job.Config.dockerClient.ContainerExecAttach(job.Ctx, resp.ID, types.ExecStartCheck{})
-		if errdefs.IsCancelled(err) {
-			return
-		}
-		panicIfErr(err)
-		_, err = stdcopy.StdCopy(&output, &output, attachResp.Reader)
-		if errdefs.IsCancelled(err) {
-			return
-		}
-		panicIfErr(err)
-
-		if bytes.Contains(output.Bytes(), []byte("1 FAILED TEST")) {
+		success, output := job.Runner.RunTest(job.TestSuite, job.Name)
+		if !success {
 			log.Printf("Test %s finished: FAILED", job.Name)
 			job.Success = false
-			job.TestOutput = output.Bytes()
-			if options.DeleteContainers {
-				cleanContainer(job.Ctx, job.Config.dockerClient, job.ContainerName)
-			}
+			job.TestOutput = output
 		} else {
 			log.Printf("Test %s finished: OK", job.Name)
 			job.Success = true
-			cleanContainer(job.Ctx, job.Config.dockerClient, job.ContainerName)
 			if options.AllOutput {
-				job.TestOutput = output.Bytes()
+				job.TestOutput = output
 			}
 		}
 	}
-}
-
-func setupContainer(name string, client *client.Client, ctx context.Context) {
-	cont, err := client.ContainerInspect(ctx, name)
-	if err == nil {
-		log.Printf("Container %s already exists, removing it...\n", name)
-		cleanContainer(ctx, client, cont.Name)
-	} else if errdefs.IsNotFound(err) {
-		log.Printf("Container %s does not exist, creating it...\n", name)
-	} else if errdefs.IsCancelled(err) {
-		return
-	} else {
-		panicIfErr(err)
-	}
-
-	resp, err := client.ContainerCreate(
-		ctx,
-		&container.Config{
-			Image: imageName,
-			Cmd:   []string{"sleep", "infinity"},
-			Tty:   true,
-			Env:   []string{"TERM=xterm" /* , "DEBUG=1", "DEBUG_LEVEL=5" */},
-		},
-		&container.HostConfig{},
-		nil,
-		nil,
-		name,
-	)
-	if errdefs.IsCancelled(err) {
-		return
-	}
-	panicIfErr(err)
-
-	err = client.ContainerStart(ctx, resp.ID, container.StartOptions{})
-	if errdefs.IsCancelled(err) {
-		return
-	}
-	panicIfErr(err)
-
-	for {
-		container, err := client.ContainerInspect(ctx, resp.ID)
-		if errdefs.IsCancelled(err) {
-			return
-		}
-		panicIfErr(err)
-
-		if container.State.Running {
-			break
-		}
-
-		log.Printf("Waiting for container %s to start...\n", name)
-		time.Sleep(1 * time.Second)
-	}
-}
-
-func cleanContainer(ctx context.Context, client *client.Client, name string) {
-	err := client.ContainerStop(ctx, name, container.StopOptions{Signal: "SIGKILL"})
-	if errdefs.IsCancelled(err) {
-		return
-	}
-	panicIfErr(err)
-
-	err = client.ContainerRemove(ctx, name, container.RemoveOptions{Force: true})
-	if errdefs.IsCancelled(err) {
-		return
-	}
-	panicIfErr(err)
-}
-
-// Funny how this works on a """Recommended""" docker setup without requiring
-// root privileges
-func setCorePattern(original string, ctx context.Context, client *client.Client) {
-	const name string = "sfs-tmp"
-	setupContainer(name, client, ctx)
-	defer cleanContainer(ctx, client, "sfs-tmp")
-
-	execConfig := types.ExecConfig{
-		Cmd:          []string{"bash", "-c", "echo \"" + original + "\" > /proc/sys/kernel/core_pattern"},
-		AttachStdout: true,
-		AttachStderr: true,
-	}
-	resp, err := client.ContainerExecCreate(ctx, name, execConfig)
-	panicIfErr(err)
-	respAttach, err := client.ContainerExecAttach(ctx, resp.ID, types.ExecStartCheck{})
-
-	_, err = stdcopy.StdCopy(os.Stdout, os.Stderr, respAttach.Reader)
-	panicIfErr(err)
-}
-
-func getSuites(ctx context.Context, client *client.Client, containerName string) map[string][]string {
-	suites := map[string][]string{}
-	execConfig := types.ExecConfig{
-		Cmd:          []string{"bash", "-c", "ls -1 /saunafs/tests/test_suites/"},
-		AttachStdout: true,
-		AttachStderr: true,
-	}
-	resp, err := client.ContainerExecCreate(ctx, containerName, execConfig)
-	panicIfErr(err)
-	respAttach, err := client.ContainerExecAttach(ctx, resp.ID, types.ExecStartCheck{})
-
-	var stdout bytes.Buffer
-
-	_, err = stdcopy.StdCopy(&stdout, os.Stderr, respAttach.Reader)
-	panicIfErr(err)
-	filesLines := bytes.Split(stdout.Bytes(), []byte("\n"))
-	for _, bytesLine := range filesLines {
-		line := filepath.Base(string(bytesLine))
-		if len(line) < 2 {
-			continue
-		}
-		suite, _ := strings.CutSuffix(line, filepath.Ext(line))
-		suites[suite] = make([]string, 0, 200)
-	}
-	return suites
-}
-
-func getTestGlobs(ctx context.Context, client *client.Client) map[string][]string {
-	const name string = "sfs-tmp"
-	setupContainer(name, client, ctx)
-	defer cleanContainer(ctx, client, name)
-
-	suites := getSuites(ctx, client, name)
-	for suite := range suites {
-		execConfig := types.ExecConfig{
-			Cmd:          []string{"bash", "-c", "ls -1 /saunafs/tests/test_suites/" + suite + "/" + options.TestPattern + ".sh"},
-			AttachStdout: true,
-			AttachStderr: false,
-		}
-		resp, err := client.ContainerExecCreate(ctx, name, execConfig)
-		panicIfErr(err)
-		respAttach, err := client.ContainerExecAttach(ctx, resp.ID, types.ExecStartCheck{})
-
-		var stdout bytes.Buffer
-
-		_, err = stdcopy.StdCopy(&stdout, os.Stderr, respAttach.Reader)
-		panicIfErr(err)
-
-		filesLines := bytes.Split(stdout.Bytes(), []byte("\n"))
-		for _, bytesLine := range filesLines {
-			line := filepath.Base(string(bytesLine))
-			if len(line) < 2 {
-				continue
-			}
-			test, _ := strings.CutSuffix(line, filepath.Ext(line))
-			suites[suite] = append(suites[suite], test)
-		}
-	}
-	return suites
 }
 
 func main() {
-	options.setup()
+	var options utils.TestOptions
+	options.SetupFromFlags()
 	// Signal handling, so we cleanup properly
 	ctx, cancel := context.WithCancel(context.Background())
 	interrupt := make(chan os.Signal, 1)
@@ -482,7 +141,6 @@ func main() {
 		log.SetOutput(io.Discard)
 		cancel()
 	}()
-	config := setupDockerConfig(options)
-
-	os.Exit(runTests(ctx, config))
+	var runner docker.DockerRunner
+	os.Exit(runTests(ctx, options, runner))
 }
