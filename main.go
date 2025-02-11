@@ -36,7 +36,6 @@ type Config struct {
 func runTests(ctx context.Context, options utils.TestOptions, runner runner.Runner) int {
 	runner.Setup(options, ctx)
 	testNames := runner.GetTests(options.TestPattern, ctx)
-	fmt.Println(testNames)
 	suite, ok := testNames[options.Suite]
 	if !ok {
 		fmt.Fprintf(os.Stderr, "Test suite %s not found, these suites are available:\n", options.Suite)
