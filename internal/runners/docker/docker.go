@@ -26,7 +26,7 @@ const (
 )
 
 type DockerRunner struct {
-	options utils.TestOptions
+	options             utils.TestOptions
 	containerConfig     container.HostConfig
 	testContainerEnvs   []string
 	dockerClient        *client.Client
@@ -81,15 +81,41 @@ func (runner *DockerRunner) RunTest(suite string, name string, ctx context.Conte
 	attachResp, err := runner.dockerClient.ContainerExecAttach(ctx, resp.ID, types.ExecStartCheck{})
 	if errdefs.IsCancelled(err) {
 		return false, ""
+	} else if err != nil {
+		utils.PanicIfErr(err)
 	}
-	utils.PanicIfErr(err)
-	_, err = stdcopy.StdCopy(&output, &output, attachResp.Reader)
-	if errdefs.IsCancelled(err) {
-		return false, ""
-	}
-	utils.PanicIfErr(err)
 
-	var success bool = false;
+	// We'll collect the error from stdcopy in this channel
+	done := make(chan error, 1)
+
+	// Start reading in a goroutine
+	go func() {
+		defer close(done)
+		_, copyErr := stdcopy.StdCopy(&output, &output, attachResp.Reader)
+		done <- copyErr
+	}()
+
+	// Now select which finishes first: ctx cancellation or stdcopy
+	select {
+	case <-ctx.Done():
+		// If context got canceled, explicitly close the attach response
+		// so that stdcopy is unblocked in its goroutine.
+		attachResp.Close()
+		timeout := 0
+		fmt.Println("Stopping container " + containerName)
+		err = runner.dockerClient.ContainerStop(context.Background(), containerName, container.StopOptions{Timeout: &timeout})
+		utils.PanicIfErr(err)
+		return false, ""
+
+	case copyErr := <-done:
+		if errdefs.IsCancelled(copyErr) {
+			return false, ""
+		} else if copyErr != nil {
+			utils.PanicIfErr(copyErr)
+		}
+	}
+
+	var success bool = false
 	if bytes.Contains(output.Bytes(), []byte("1 FAILED TEST")) {
 		success = false
 		if runner.options.DeleteContainers {
@@ -161,7 +187,7 @@ func setupMounts(options utils.TestOptions, config container.HostConfig) contain
 // Setup environment variables to use in the container
 func setupTestEnvVariables(options utils.TestOptions) []string {
 	var envVariables []string
-	if (options.SetCorePattern) {
+	if options.SetCorePattern {
 		envVariables = append(envVariables, "COREDUMP_WATCH=1")
 	}
 	multiplerVar := fmt.Sprintf("SAUNAFS_TEST_TIMEOUT_MULTIPLIER=%d", options.Multiplier)
