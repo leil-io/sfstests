@@ -26,19 +26,31 @@ const (
 )
 
 type DockerRunner struct {
-	config DockerConfig
 	options utils.TestOptions
+	containerConfig     container.HostConfig
+	testContainerEnvs   []string
+	dockerClient        *client.Client
+	originalCorePattern string
 }
 
 func (runner *DockerRunner) Setup(options utils.TestOptions, ctx context.Context) {
 	runner.options = options
-	runner.config = setupDockerConfig(options)
+	var err error
+
+	runner.containerConfig = getDefaultHostConfig(options)
+	if options.CI {
+		runner.containerConfig.Privileged = false
+	}
+	runner.containerConfig = setupMounts(options, runner.containerConfig)
+	runner.dockerClient, err = client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	utils.PanicIfErr(err)
+	runner.testContainerEnvs = setupTestEnvVariables(options)
 
 	if options.SetCorePattern {
 		originalBytes, err := os.ReadFile("/proc/sys/kernel/core_pattern")
 		utils.PanicIfErr(err)
-		runner.config.originalCorePattern = string(originalBytes)
-		setCorePattern(corePattern, runner.config.containerConfig, ctx, runner.config.dockerClient)
+		runner.originalCorePattern = string(originalBytes)
+		setCorePattern(corePattern, runner.containerConfig, ctx, runner.dockerClient)
 		// defer setCorePattern(runner.config.originalCorePattern, ctx, runner.config.dockerClient)
 	}
 }
@@ -47,7 +59,7 @@ func (runner *DockerRunner) RunTest(suite string, name string, ctx context.Conte
 	var output bytes.Buffer
 
 	containerName := fmt.Sprintf("saunafs-%s-%s", suite, name)
-	setupContainer(containerName, runner.config.containerConfig, runner.config.dockerClient, ctx)
+	setupContainer(containerName, runner.containerConfig, runner.dockerClient, ctx)
 	log.Println("Running test: " + suite + "/" + name + " in container " + containerName)
 
 	filter := fmt.Sprintf("%s.%s", suite, name)
@@ -58,15 +70,15 @@ func (runner *DockerRunner) RunTest(suite string, name string, ctx context.Conte
 		Cmd:          []string{"bash", "-c", cmd},
 		AttachStdout: true,
 		AttachStderr: true,
-		Env:          runner.config.testContainerEnvs,
+		Env:          runner.testContainerEnvs,
 	}
-	resp, err := runner.config.dockerClient.ContainerExecCreate(ctx, containerName, execConfig)
+	resp, err := runner.dockerClient.ContainerExecCreate(ctx, containerName, execConfig)
 	if errdefs.IsCancelled(err) {
 		return false, ""
 	}
 	utils.PanicIfErr(err)
 
-	attachResp, err := runner.config.dockerClient.ContainerExecAttach(ctx, resp.ID, types.ExecStartCheck{})
+	attachResp, err := runner.dockerClient.ContainerExecAttach(ctx, resp.ID, types.ExecStartCheck{})
 	if errdefs.IsCancelled(err) {
 		return false, ""
 	}
@@ -81,17 +93,20 @@ func (runner *DockerRunner) RunTest(suite string, name string, ctx context.Conte
 	if bytes.Contains(output.Bytes(), []byte("1 FAILED TEST")) {
 		success = false
 		if runner.options.DeleteContainers {
-			cleanContainer(ctx, runner.config.dockerClient, containerName)
+			cleanContainer(ctx, runner.dockerClient, containerName)
 		}
 	} else {
 		success = true
-		cleanContainer(ctx, runner.config.dockerClient, containerName)
+		cleanContainer(ctx, runner.dockerClient, containerName)
 	}
 	return success, output.String()
 
 }
 func (runner *DockerRunner) GetTests(name string, ctx context.Context) (tests map[string][]string) {
-	return getTestGlobs(ctx, runner.config.containerConfig, runner.config.dockerClient, runner.options)
+	return getTestGlobs(ctx, runner.containerConfig, runner.dockerClient, runner.options)
+}
+func (runner *DockerRunner) Cleanup(ctx context.Context) {
+	runner.dockerClient.Close()
 }
 
 func getDefaultHostConfig(options utils.TestOptions) container.HostConfig {
@@ -122,44 +137,6 @@ func getDefaultHostConfig(options utils.TestOptions) container.HostConfig {
 		CapAdd:     []string{"SYS_ADMIN", "SYS_PTRACE", "NET_ADMIN"},
 	}
 
-}
-
-type Test struct {
-	Name          string
-	TestSuite     string
-	Ctx           context.Context
-	Config        DockerConfig
-	ContainerName string
-	Success       bool
-	TestOutput    []byte
-}
-
-type DockerConfig struct {
-	containerConfig     container.HostConfig
-	testContainerEnvs   []string
-	dockerClient        *client.Client
-	originalCorePattern string
-}
-
-func (cfg *DockerConfig) cleanUp() {
-	cfg.dockerClient.Close()
-
-}
-
-func setupDockerConfig(options utils.TestOptions) DockerConfig {
-	var config DockerConfig
-	var err error
-
-	config.containerConfig = getDefaultHostConfig(options)
-	if options.CI {
-		config.containerConfig.Privileged = false
-	}
-	config.containerConfig = setupMounts(options, config.containerConfig)
-	config.dockerClient, err = client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
-	utils.PanicIfErr(err)
-	config.testContainerEnvs = setupTestEnvVariables(options)
-
-	return config
 }
 
 func setupMounts(options utils.TestOptions, config container.HostConfig) container.HostConfig {

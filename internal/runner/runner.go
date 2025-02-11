@@ -11,4 +11,5 @@ type Runner interface {
 	RunTest(suite string, name string, ctx context.Context) (succeded bool, output string)
 	// 'name' must handle wildcard (*) pattern
 	GetTests(name string, ctx context.Context) (tests map[string][]string)
+	Cleanup(ctx context.Context)
 }

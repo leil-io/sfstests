@@ -76,6 +76,7 @@ func runTests(ctx context.Context, options utils.TestOptions, runner runner.Runn
 		return 2
 	}
 	log.Println("All tests finished")
+	runner.Cleanup(ctx)
 
 	return printTestResults(tests, options)
 }
