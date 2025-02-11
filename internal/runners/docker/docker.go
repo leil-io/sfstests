@@ -91,8 +91,13 @@ func (runner *DockerRunner) RunTest(suite string, name string, ctx context.Conte
 	// Start reading in a goroutine
 	go func() {
 		defer close(done)
-		_, copyErr := stdcopy.StdCopy(&output, &output, attachResp.Reader)
-		done <- copyErr
+		var err error
+		if runner.options.Workers == 1 && runner.options.AllOutput {
+			_, err = stdcopy.StdCopy(os.Stdout, &output, attachResp.Reader)
+		} else {
+			_, err = stdcopy.StdCopy(&output, &output, attachResp.Reader)
+		}
+		done <- err
 	}()
 
 	// Now select which finishes first: ctx cancellation or stdcopy

@@ -87,7 +87,7 @@ func printTestResults(tests []*Test, options utils.TestOptions) int {
 	for _, test := range tests {
 		if test.Success {
 			fmt.Printf("TEST %s: OK\n", test.Name)
-			if options.AllOutput {
+			if options.Workers > 1 && options.AllOutput {
 				fmt.Printf("- %s OUTPUT -\n", test.Name)
 				fmt.Printf("%s\n", string(test.TestOutput))
 				fmt.Printf("- END OUTPUT -\n")
@@ -98,9 +98,11 @@ func printTestResults(tests []*Test, options utils.TestOptions) int {
 	for _, test := range tests {
 		if !test.Success {
 			fmt.Printf("TEST %s: FAILED\n", test.Name)
-			fmt.Printf("- %s OUTPUT -\n", test.Name)
-			fmt.Printf("%s\n", string(test.TestOutput))
-			fmt.Printf("- END OUTPUT -\n")
+			if options.Workers > 1 && !options.AllOutput {
+				fmt.Printf("- %s OUTPUT -\n", test.Name)
+				fmt.Printf("%s\n", string(test.TestOutput))
+				fmt.Printf("- END OUTPUT -\n")
+			}
 			exitCode = 1
 		}
 	}
