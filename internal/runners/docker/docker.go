@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -93,7 +94,8 @@ func (runner *DockerRunner) RunTest(suite string, name string, ctx context.Conte
 		defer close(done)
 		var err error
 		if runner.options.Workers == 1 && runner.options.AllOutput {
-			_, err = stdcopy.StdCopy(os.Stdout, &output, attachResp.Reader)
+			w := io.MultiWriter(&output, os.Stdout)
+			_, err = stdcopy.StdCopy(w, &output, attachResp.Reader)
 		} else {
 			_, err = stdcopy.StdCopy(&output, &output, attachResp.Reader)
 		}
@@ -159,7 +161,7 @@ func getDefaultHostConfig(options utils.TestOptions) container.HostConfig {
 					Hard: -1,
 				},
 			},
-			CPUCount: int64(options.CpuLimit),
+			NanoCPUs: int64(options.CpuLimit),
 		},
 		Tmpfs: map[string]string{
 			"/mnt/ramdisk": "rw,mode=1777,size=2g",
