@@ -19,6 +19,7 @@ type TestOptions struct {
 	AuthFile         string
 	SetCorePattern   bool
 	CI               bool
+	SkipTestsOnFail  bool
 }
 
 func (options *TestOptions) SetupFromFlags() {
@@ -51,6 +52,7 @@ func (options *TestOptions) SetupFromFlags() {
 	flag.StringVar(&options.AuthFile, "auth", "", "APT auth full path for upgrade tests, otherwise upgrades are skipped")
 
 	flag.BoolVar(&options.SetCorePattern, "setcore", false, "(EXPERIMENTAL): Manage the core pattern, note if the program is killed or otherwise forced to exit without cleaning up, you need to set it back yourself")
+	flag.BoolVar(&options.SkipTestsOnFail, "skip-on-fail", false, "Skip remaining tests on a single fail")
 
 	flag.Parse()
 }

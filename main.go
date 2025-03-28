@@ -12,18 +12,18 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
-	"leil.io/sfstests/internal/runner"
 	"leil.io/sfstests/internal/runners/docker"
 	"leil.io/sfstests/internal/utils"
 )
 
 type Test struct {
-	Name          string
-	TestSuite     string
-	Ctx           context.Context
-	Runner        runner.Runner
-	Success       bool
-	TestOutput    string
+	Name       string
+	TestSuite  string
+	Ctx        context.Context
+	CancelRun  context.CancelFunc
+	Runner     Runner
+	Result     utils.TestResult
+	TestOutput string
 }
 
 type Config struct {
@@ -33,7 +33,15 @@ type Config struct {
 	originalCorePattern string
 }
 
-func runTests(ctx context.Context, options utils.TestOptions, runner runner.Runner) int {
+type Runner interface {
+	Setup(options utils.TestOptions, ctx context.Context)
+	RunTest(suite string, name string, ctx context.Context) (succeded utils.TestResult, output string)
+	// 'name' must handle wildcard (*) pattern
+	GetTests(name string, ctx context.Context) (tests map[string][]string)
+	Cleanup(ctx context.Context)
+}
+
+func runTests(ctx context.Context, options utils.TestOptions, runner Runner, cancel context.CancelFunc) int {
 	runner.Setup(options, ctx)
 	testNames := runner.GetTests(options.TestPattern, ctx)
 	suite, ok := testNames[options.Suite]
@@ -52,7 +60,7 @@ func runTests(ctx context.Context, options utils.TestOptions, runner runner.Runn
 
 	for range options.Workers {
 		wg.Add(1)
-		go runTest(jobs, &wg, options, ctx)
+		go testWorker(jobs, &wg, options)
 	}
 
 	for _, testName := range suite {
@@ -61,30 +69,56 @@ func runTests(ctx context.Context, options utils.TestOptions, runner runner.Runn
 			continue
 		}
 		test := &Test{
-			Name:          testName,
-			TestSuite:     options.Suite,
-			Ctx:           ctx,
-			Runner:        runner,
+			Name:      testName,
+			TestSuite: options.Suite,
+			Ctx:       ctx,
+			CancelRun: cancel,
+			Runner:    runner,
 		}
 		jobs <- test
 		tests = append(tests, test)
 	}
 	close(jobs)
 	wg.Wait()
-	if ctx.Err() != nil {
-		return 2
-	}
 	log.Println("All tests finished")
 	runner.Cleanup(ctx)
 
-	return printTestResults(tests, options)
+	exitCode := printTestResults(tests, options)
+
+	if ctx.Err() != nil && options.SkipTestsOnFail {
+		return 2
+	} else {
+		return exitCode
+	}
+}
+
+func testWorker(jobs <-chan *Test, wg *sync.WaitGroup, options utils.TestOptions) {
+	defer wg.Done()
+
+	for job := range jobs {
+		var output string
+		job.Result, output = job.Runner.RunTest(job.TestSuite, job.Name, job.Ctx)
+		if job.Result == utils.TestFailed {
+			log.Printf("Test %s finished: FAILED", job.Name)
+			job.TestOutput = output
+			if options.SkipTestsOnFail {
+				log.SetOutput(io.Discard)
+				job.CancelRun()
+			}
+		} else if job.Result == utils.TestSuccess {
+			log.Printf("Test %s finished: OK", job.Name)
+			if options.AllOutput {
+				job.TestOutput = output
+			}
+		}
+	}
 }
 
 // Print results of tests and return 1 if at least one test failed, otherwise 0
 func printTestResults(tests []*Test, options utils.TestOptions) int {
 	exitCode := 0
 	for _, test := range tests {
-		if test.Success {
+		if test.Result == utils.TestSuccess {
 			fmt.Printf("TEST %s: OK\n", test.Name)
 			if options.Workers > 1 && options.AllOutput {
 				fmt.Printf("- %s OUTPUT -\n", test.Name)
@@ -95,7 +129,7 @@ func printTestResults(tests []*Test, options utils.TestOptions) int {
 	}
 	// Go through the tests twice, to keep things ordered.
 	for _, test := range tests {
-		if !test.Success {
+		if test.Result == utils.TestFailed {
 			fmt.Printf("TEST %s: FAILED\n", test.Name)
 			if !options.AllOutput || options.Workers > 1 {
 				fmt.Printf("- %s OUTPUT -\n", test.Name)
@@ -106,25 +140,6 @@ func printTestResults(tests []*Test, options utils.TestOptions) int {
 		}
 	}
 	return exitCode
-}
-
-func runTest(jobs <-chan *Test, wg *sync.WaitGroup, options utils.TestOptions, ctx context.Context) {
-	defer wg.Done()
-
-	for job := range jobs {
-		success, output := job.Runner.RunTest(job.TestSuite, job.Name, ctx)
-		if !success {
-			log.Printf("Test %s finished: FAILED", job.Name)
-			job.Success = false
-			job.TestOutput = output
-		} else {
-			log.Printf("Test %s finished: OK", job.Name)
-			job.Success = true
-			if options.AllOutput {
-				job.TestOutput = output
-			}
-		}
-	}
 }
 
 func main() {
@@ -141,5 +156,5 @@ func main() {
 		cancel()
 	}()
 	var runner docker.DockerRunner
-	os.Exit(runTests(ctx, options, &runner))
+	os.Exit(runTests(ctx, options, &runner, cancel))
 }

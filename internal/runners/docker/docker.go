@@ -56,7 +56,7 @@ func (runner *DockerRunner) Setup(options utils.TestOptions, ctx context.Context
 	}
 }
 
-func (runner *DockerRunner) RunTest(suite string, name string, ctx context.Context) (bool, string) {
+func (runner *DockerRunner) RunTest(suite string, name string, ctx context.Context) (utils.TestResult, string) {
 	var output bytes.Buffer
 
 	containerName := fmt.Sprintf("saunafs-%s-%s", suite, name)
@@ -75,16 +75,17 @@ func (runner *DockerRunner) RunTest(suite string, name string, ctx context.Conte
 	}
 	resp, err := runner.dockerClient.ContainerExecCreate(ctx, containerName, execConfig)
 	if errdefs.IsCancelled(err) {
-		return false, ""
+		cleanContainer(context.Background(), runner.dockerClient, containerName)
+		return utils.TestCancelled, ""
 	}
 	utils.PanicIfErr(err)
 
 	attachResp, err := runner.dockerClient.ContainerExecAttach(ctx, resp.ID, types.ExecStartCheck{})
 	if errdefs.IsCancelled(err) {
-		return false, ""
-	} else if err != nil {
-		utils.PanicIfErr(err)
+		cleanContainer(context.Background(), runner.dockerClient, containerName)
+		return utils.TestCancelled, ""
 	}
+	utils.PanicIfErr(err)
 
 	// We'll collect the error from stdcopy in this channel
 	done := make(chan error, 1)
@@ -108,28 +109,28 @@ func (runner *DockerRunner) RunTest(suite string, name string, ctx context.Conte
 		// If context got canceled, explicitly close the attach response
 		// so that stdcopy is unblocked in its goroutine.
 		attachResp.Close()
-		timeout := 0
-		fmt.Println("Stopping container " + containerName)
-		err = runner.dockerClient.ContainerStop(context.Background(), containerName, container.StopOptions{Timeout: &timeout})
+		// Log might be closed, so we print to stderr directly
+		fmt.Fprintln(os.Stderr, "Stopping container "+containerName)
+		cleanContainer(context.Background(), runner.dockerClient, containerName)
 		utils.PanicIfErr(err)
-		return false, ""
+		return utils.TestCancelled, ""
 
 	case copyErr := <-done:
 		if errdefs.IsCancelled(copyErr) {
-			return false, ""
+			cleanContainer(context.Background(), runner.dockerClient, containerName)
+			return utils.TestCancelled, ""
 		} else if copyErr != nil {
 			utils.PanicIfErr(copyErr)
 		}
 	}
 
-	var success bool = false
+	var success utils.TestResult = utils.TestFailed
 	if bytes.Contains(output.Bytes(), []byte("1 FAILED TEST")) {
-		success = false
 		if runner.options.DeleteContainers {
 			cleanContainer(ctx, runner.dockerClient, containerName)
 		}
 	} else {
-		success = true
+		success = utils.TestSuccess
 		cleanContainer(ctx, runner.dockerClient, containerName)
 	}
 	return success, output.String()
@@ -257,7 +258,7 @@ func setupContainer(name string, containerConfig container.HostConfig, client *c
 
 func cleanContainer(ctx context.Context, client *client.Client, name string) {
 	err := client.ContainerStop(ctx, name, container.StopOptions{Signal: "SIGKILL"})
-	if errdefs.IsCancelled(err) {
+	if errdefs.IsCancelled(err) || errdefs.IsNotFound(err) {
 		return
 	}
 	utils.PanicIfErr(err)
