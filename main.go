@@ -12,18 +12,18 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
+	"leil.io/sfstests/internal/reports"
 	"leil.io/sfstests/internal/runners/docker"
 	"leil.io/sfstests/internal/utils"
 )
 
 type Test struct {
-	Name       string
-	TestSuite  string
-	Ctx        context.Context
-	CancelRun  context.CancelFunc
-	Runner     Runner
-	Result     utils.TestResult
-	TestOutput string
+	Name      string
+	TestSuite string
+	Ctx       context.Context
+	CancelRun context.CancelFunc
+	Runner    Runner
+	Report    reports.TestReport
 }
 
 type Config struct {
@@ -35,7 +35,7 @@ type Config struct {
 
 type Runner interface {
 	Setup(options utils.TestOptions, ctx context.Context)
-	RunTest(suite string, name string, ctx context.Context) (succeded utils.TestResult, output string)
+	RunTest(suite string, name string, ctx context.Context) reports.TestReport
 	// 'name' must handle wildcard (*) pattern
 	GetTests(name string, ctx context.Context) (tests map[string][]string)
 	Cleanup(ctx context.Context)
@@ -97,20 +97,15 @@ func testWorker(jobs <-chan *Test, wg *sync.WaitGroup, options utils.TestOptions
 	defer wg.Done()
 
 	for job := range jobs {
-		var output string
-		job.Result, output = job.Runner.RunTest(job.TestSuite, job.Name, job.Ctx)
-		if job.Result == utils.TestFailed {
+		job.Report = job.Runner.RunTest(job.TestSuite, job.Name, job.Ctx)
+		if job.Report.Result == reports.TestFailed {
 			log.Printf("Test %s finished: FAILED", job.Name)
-			job.TestOutput = output
 			if options.SkipTestsOnFail {
 				log.SetOutput(io.Discard)
 				job.CancelRun()
 			}
-		} else if job.Result == utils.TestSuccess {
+		} else if job.Report.Result == reports.TestSuccess {
 			log.Printf("Test %s finished: OK", job.Name)
-			if options.AllOutput {
-				job.TestOutput = output
-			}
 		}
 	}
 }
@@ -119,22 +114,22 @@ func testWorker(jobs <-chan *Test, wg *sync.WaitGroup, options utils.TestOptions
 func printTestResults(tests []*Test, options utils.TestOptions) int {
 	exitCode := 0
 	for _, test := range tests {
-		if test.Result == utils.TestSuccess {
+		if test.Report.Result == reports.TestSuccess {
 			fmt.Printf("TEST %s: OK\n", test.Name)
 			if options.Workers > 1 && options.AllOutput {
 				fmt.Printf("- %s OUTPUT -\n", test.Name)
-				fmt.Printf("%s\n", string(test.TestOutput))
+				fmt.Printf("%s\n", string(test.Report.AllOutput))
 				fmt.Printf("- END OUTPUT -\n")
 			}
 		}
 	}
 	// Go through the tests twice, to keep things ordered.
 	for _, test := range tests {
-		if test.Result == utils.TestFailed {
+		if test.Report.Result == reports.TestFailed {
 			fmt.Printf("TEST %s: FAILED\n", test.Name)
 			if !options.AllOutput || options.Workers > 1 {
 				fmt.Printf("- %s OUTPUT -\n", test.Name)
-				fmt.Printf("%s\n", string(test.TestOutput))
+				fmt.Printf("%s\n", string(test.Report.AllOutput))
 				fmt.Printf("- END OUTPUT -\n")
 			}
 			exitCode = 1

@@ -18,6 +18,7 @@ import (
 	"github.com/docker/docker/errdefs"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-units"
+	"leil.io/sfstests/internal/reports"
 	"leil.io/sfstests/internal/utils"
 )
 
@@ -56,7 +57,11 @@ func (runner *DockerRunner) Setup(options utils.TestOptions, ctx context.Context
 	}
 }
 
-func (runner *DockerRunner) RunTest(suite string, name string, ctx context.Context) (utils.TestResult, string) {
+func (runner *DockerRunner) RunTest(suite string, name string, ctx context.Context) reports.TestReport {
+	report := reports.TestReport {
+		Result: reports.TestCancelled,
+		TestName: name,
+	}
 	var output bytes.Buffer
 
 	containerName := fmt.Sprintf("saunafs-%s-%s", suite, name)
@@ -64,8 +69,11 @@ func (runner *DockerRunner) RunTest(suite string, name string, ctx context.Conte
 	log.Println("Running test: " + suite + "/" + name + " in container " + containerName)
 
 	filter := fmt.Sprintf("%s.%s", suite, name)
-	gtestFilter := fmt.Sprintf("--gtest_filter=%s", filter)
-	cmd := "touch /var/log/syslog; chown syslog:syslog /var/log/syslog; rsyslogd; saunafs-tests " + gtestFilter
+	xmlPath := " --gtest_output=/xml"
+	gtestFilter := fmt.Sprintf(" --gtest_filter=%s", filter)
+	cmd := "touch /var/log/syslog; chown syslog:syslog /var/log/syslog; rsyslogd; saunafs-tests"
+	cmd += gtestFilter
+	cmd += xmlPath
 
 	execConfig := types.ExecConfig{
 		Cmd:          []string{"bash", "-c", cmd},
@@ -76,14 +84,15 @@ func (runner *DockerRunner) RunTest(suite string, name string, ctx context.Conte
 	resp, err := runner.dockerClient.ContainerExecCreate(ctx, containerName, execConfig)
 	if errdefs.IsCancelled(err) {
 		cleanContainer(context.Background(), runner.dockerClient, containerName)
-		return utils.TestCancelled, ""
+		return report
 	}
 	utils.PanicIfErr(err)
 
+	execStart := time.Now()
 	attachResp, err := runner.dockerClient.ContainerExecAttach(ctx, resp.ID, types.ExecStartCheck{})
 	if errdefs.IsCancelled(err) {
 		cleanContainer(context.Background(), runner.dockerClient, containerName)
-		return utils.TestCancelled, ""
+		return report
 	}
 	utils.PanicIfErr(err)
 
@@ -113,27 +122,31 @@ func (runner *DockerRunner) RunTest(suite string, name string, ctx context.Conte
 		fmt.Fprintln(os.Stderr, "Stopping container "+containerName)
 		cleanContainer(context.Background(), runner.dockerClient, containerName)
 		utils.PanicIfErr(err)
-		return utils.TestCancelled, ""
+		return report
 
 	case copyErr := <-done:
 		if errdefs.IsCancelled(copyErr) {
 			cleanContainer(context.Background(), runner.dockerClient, containerName)
-			return utils.TestCancelled, ""
+			return report
 		} else if copyErr != nil {
 			utils.PanicIfErr(copyErr)
 		}
 	}
+	execEnd := time.Now()
+	report.Time = execEnd.Sub(execStart)
 
-	var success utils.TestResult = utils.TestFailed
+	var success reports.TestResult = reports.TestFailed
 	if bytes.Contains(output.Bytes(), []byte("1 FAILED TEST")) {
 		if runner.options.DeleteContainers {
 			cleanContainer(ctx, runner.dockerClient, containerName)
 		}
 	} else {
-		success = utils.TestSuccess
+		success = reports.TestSuccess
 		cleanContainer(ctx, runner.dockerClient, containerName)
 	}
-	return success, output.String()
+	report.AllOutput = output.Bytes()
+	report.Result = success
+	return report
 
 }
 func (runner *DockerRunner) GetTests(name string, ctx context.Context) (tests map[string][]string) {
