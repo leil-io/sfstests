@@ -113,6 +113,16 @@ func isShortSet(fs *flag.FlagSet, shortName string) bool {
 	return found
 }
 
+func flagNameToEnvVar(flagName string) string {
+	envVar := []byte("SFSTESTS_" + strings.ToUpper(flagName))
+	for i, c := range envVar {
+		if c == '-' {
+			envVar[i] = '_'
+		}
+	}
+	return string(envVar)
+}
+
 // Set env variables for unset flags
 func setEnvVariables(fs *flag.FlagSet) {
 	for _, f := range getUnsetFlags(fs) {
@@ -126,7 +136,7 @@ func setEnvVariables(fs *flag.FlagSet) {
 			// Ignore short option env variables
 			continue
 		}
-		envVar = "SFSTESTS_" + strings.ToUpper(f.Name)
+		envVar = flagNameToEnvVar(f.Name)
 
 		v := os.Getenv(envVar)
 		if v == "" {
