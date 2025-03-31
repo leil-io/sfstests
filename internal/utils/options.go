@@ -144,7 +144,7 @@ func setEnvVariables(fs *flag.FlagSet) {
 		}
 		err := f.Value.Set(v)
 		if err != nil {
-			log.Printf("Invalid environment variable '%s=%s', using default '%s'\n", envVar, v, f.DefValue)
+			log.Printf("Invalid environment variable '%s=%s'\n", envVar, v)
 			log.Printf("Using default '%s=%s'\n", envVar, f.DefValue)
 			err = f.Value.Set(f.DefValue)
 			PanicIfErr(err)
