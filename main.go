@@ -58,6 +58,7 @@ func runTests(ctx context.Context, options utils.TestOptions, runner Runner, can
 
 	var wg sync.WaitGroup
 
+	log.Printf("Using %v workers\n", options.Workers)
 	for range options.Workers {
 		wg.Add(1)
 		go testWorker(jobs, &wg, options)
