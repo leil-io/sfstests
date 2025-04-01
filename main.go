@@ -83,14 +83,45 @@ func runTests(ctx context.Context, options utils.TestOptions, runner Runner, can
 	wg.Wait()
 	log.Println("All tests finished")
 	runner.Cleanup(ctx)
+	runRep := compileSuiteReport(tests, options)
 
-	exitCode := printTestResults(tests, options)
+	// TODO(Urmas): Currently only one suite can be run at a time.
+	exitCode := printTestResults(runRep.SuiteReports[0], options)
+	if options.XMLPath != "" {
+		err := writeXMLReportToFile(options.XMLPath, runRep)
+		if err != nil {
+			exitCode = 3
+		}
+	}
+
 
 	if ctx.Err() != nil && options.SkipTestsOnFail {
 		return 2
 	} else {
 		return exitCode
 	}
+}
+
+func writeXMLReportToFile(path string, report reports.RunReport) error {
+	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Could not open file %s: %e", path, err)
+		return err
+	}
+	defer file.Close()
+	reports.WriteXMLReport(file, report)
+	return nil
+}
+
+func compileSuiteReport(tests []*Test, options utils.TestOptions) reports.RunReport {
+	runRep := reports.RunReport{}
+	suiteRep := reports.SuiteReport{}
+	suiteRep.SuiteName = options.Suite
+	for _, test := range tests {
+		suiteRep.TestReports = append(suiteRep.TestReports, test.Report)
+	}
+	runRep.SuiteReports = append(runRep.SuiteReports, suiteRep)
+	return runRep
 }
 
 func testWorker(jobs <-chan *Test, wg *sync.WaitGroup, options utils.TestOptions) {
@@ -111,25 +142,25 @@ func testWorker(jobs <-chan *Test, wg *sync.WaitGroup, options utils.TestOptions
 }
 
 // Print results of tests and return 1 if at least one test failed, otherwise 0
-func printTestResults(tests []*Test, options utils.TestOptions) int {
+func printTestResults(report reports.SuiteReport, options utils.TestOptions) int {
 	exitCode := 0
-	for _, test := range tests {
-		if test.Report.Result == reports.TestSuccess {
-			fmt.Printf("TEST %s: OK\n", test.Name)
+	for _, test := range report.TestReports {
+		if test.Result == reports.TestSuccess {
+			fmt.Printf("TEST %s: OK\n", test.TestName)
 			if options.Workers > 1 && options.AllOutput {
-				fmt.Printf("- %s OUTPUT -\n", test.Name)
-				fmt.Printf("%s\n", string(test.Report.AllOutput))
+				fmt.Printf("- %s OUTPUT -\n", test.TestName)
+				fmt.Printf("%s\n", string(test.AllOutput))
 				fmt.Printf("- END OUTPUT -\n")
 			}
 		}
 	}
 	// Go through the tests twice, to keep things ordered.
-	for _, test := range tests {
-		if test.Report.Result == reports.TestFailed {
-			fmt.Printf("TEST %s: FAILED\n", test.Name)
+	for _, test := range report.TestReports {
+		if test.Result == reports.TestFailed {
+			fmt.Printf("TEST %s: FAILED\n", test.TestName)
 			if !options.AllOutput || options.Workers > 1 {
-				fmt.Printf("- %s OUTPUT -\n", test.Name)
-				fmt.Printf("%s\n", string(test.Report.AllOutput))
+				fmt.Printf("- %s OUTPUT -\n", test.TestName)
+				fmt.Printf("%s\n", string(test.AllOutput))
 				fmt.Printf("- END OUTPUT -\n")
 			}
 			exitCode = 1

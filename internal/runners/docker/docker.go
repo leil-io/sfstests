@@ -69,11 +69,9 @@ func (runner *DockerRunner) RunTest(suite string, name string, ctx context.Conte
 	log.Println("Running test: " + suite + "/" + name + " in container " + containerName)
 
 	filter := fmt.Sprintf("%s.%s", suite, name)
-	xmlPath := " --gtest_output=/xml"
 	gtestFilter := fmt.Sprintf(" --gtest_filter=%s", filter)
 	cmd := "touch /var/log/syslog; chown syslog:syslog /var/log/syslog; rsyslogd; saunafs-tests"
 	cmd += gtestFilter
-	cmd += xmlPath
 
 	execConfig := types.ExecConfig{
 		Cmd:          []string{"bash", "-c", cmd},

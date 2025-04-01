@@ -77,7 +77,7 @@ func (options *TestOptions) SetupFromFlags() {
 	flag.BoolVar(&options.SetCorePattern, "setcore", false, "(EXPERIMENTAL): Manage the core pattern, note if the program is killed or otherwise forced to exit without cleaning up, you need to set it back yourself")
 	flag.BoolVar(&options.SkipTestsOnFail, "skip-on-fail", false, "Skip remaining tests on a single fail")
 
-	flag.StringVar(&options.XMLPath, "xml-path", "", "Path for JUnit test results from gtest (must be full path)")
+	flag.StringVar(&options.XMLPath, "xml-path", "", "Filename path for JUnit test results from gtest")
 
 	flag.Parse()
 
