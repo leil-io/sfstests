@@ -43,7 +43,8 @@ func calculateFullTime(report RunReport) time.Duration {
 }
 
 func WriteXMLReport(writer io.Writer, report RunReport) {
-	writer.Write(generateXMLReport(report))
+	_, err := writer.Write(generateXMLReport(report))
+	utils.PanicIfErr(err)
 }
 
 func generateXMLReport(report RunReport) []byte {
