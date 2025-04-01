@@ -91,6 +91,10 @@ func runTests(ctx context.Context, options utils.TestOptions, runner Runner, can
 		err := writeXMLReportToFile(options.XMLPath, runRep)
 		if err != nil {
 			exitCode = 3
+		} else {
+			// Jenkins will determine whether to fail based on the
+			// XML file
+			exitCode = 0
 		}
 	}
 
