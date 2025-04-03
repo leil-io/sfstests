@@ -133,7 +133,6 @@ func testWorker(jobs <-chan *Test, wg *sync.WaitGroup, options utils.TestOptions
 	for job := range jobs {
 		job.Report = job.Runner.RunTest(job.TestSuite, job.Name, job.Ctx)
 		if job.Report.Result == reports.TestFailed {
-			log.Println(options.Flakes)
 			// TODO(Urmas): Clean this mess up
 			if options.Flakes > 1 {
 				for testTries := 2; testTries <= options.Flakes; testTries++ {
