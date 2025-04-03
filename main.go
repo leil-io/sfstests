@@ -98,7 +98,6 @@ func runTests(ctx context.Context, options utils.TestOptions, runner Runner, can
 		}
 	}
 
-
 	if ctx.Err() != nil && options.SkipTestsOnFail {
 		return 2
 	} else {
@@ -134,7 +133,28 @@ func testWorker(jobs <-chan *Test, wg *sync.WaitGroup, options utils.TestOptions
 	for job := range jobs {
 		job.Report = job.Runner.RunTest(job.TestSuite, job.Name, job.Ctx)
 		if job.Report.Result == reports.TestFailed {
-			log.Printf("Test %s finished: FAILED", job.Name)
+			log.Println(options.Flakes)
+			// TODO(Urmas): Clean this mess up
+			if options.Flakes > 1 {
+				for testTries := 2; testTries <= options.Flakes; testTries++ {
+					log.Printf("Test %s failed initially, retrying to see if it's flaky (%v/%v)", job.Name, testTries, options.Flakes)
+					lastFailure := job.Report.AllOutput
+					job.Report = job.Runner.RunTest(job.TestSuite, job.Name, job.Ctx)
+					job.Report.LastFailureOutput = lastFailure
+					if job.Report.Result == reports.TestSuccess {
+						log.Printf("Test %s passed when it failed before, considered FLAKY (%v/%v)", job.Name, testTries, options.Flakes)
+						job.Report.Result = reports.TestFlaky
+						break
+					} else if job.Report.Result == reports.TestFailed {
+						log.Printf("Test %s finished: FAILED (%v/%v)", job.Name, testTries, options.Flakes)
+					}
+				}
+				if job.Report.Result == reports.TestFlaky {
+					continue
+				}
+			} else {
+				log.Printf("Test %s finished: FAILED", job.Name)
+			}
 			if options.SkipTestsOnFail {
 				log.SetOutput(io.Discard)
 				job.CancelRun()

@@ -24,23 +24,24 @@ type TestOptions struct {
 	CI               bool
 	XMLPath          string
 	SkipTestsOnFail  bool
+	Flakes           int
 }
 
-var longToShort = map[string]string {
+var longToShort = map[string]string{
 	"workers": "w",
-	"test": "t",
-	"cpus": "c",
-	"all": "a",
-	"delete": "d",
-	"mount": "m",
+	"test":    "t",
+	"cpus":    "c",
+	"all":     "a",
+	"delete":  "d",
+	"mount":   "m",
 }
 
 func reverseMap(oldMap map[string]string) map[string]string {
-    newMap := make(map[string]string, len(oldMap))
-    for k, v := range oldMap {
-        newMap[v] = k
-    }
-    return newMap
+	newMap := make(map[string]string, len(oldMap))
+	for k, v := range oldMap {
+		newMap[v] = k
+	}
+	return newMap
 }
 
 var shortToLong = reverseMap(longToShort)
@@ -78,6 +79,7 @@ func (options *TestOptions) SetupFromFlags() {
 	flag.BoolVar(&options.SkipTestsOnFail, "skip-on-fail", false, "Skip remaining tests on a single fail")
 
 	flag.StringVar(&options.XMLPath, "xml-path", "", "Filename path for JUnit test results from gtest")
+	flag.IntVar(&options.Flakes, "flakes", 1, "Test for flaky'nes if more than 1. The value is the amount of times to retry a single test")
 
 	flag.Parse()
 

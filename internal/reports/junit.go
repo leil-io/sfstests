@@ -9,11 +9,17 @@ import (
 	"leil.io/sfstests/internal/utils"
 )
 
+type jUnitFlakyFailure struct {
+	StackTrace string `xml:"stackTrace"`
+}
+
 type jUnitTestReport struct {
-	Name      string `xml:"name,attr"`
-	SuiteName string `xml:"classname,attr"`
-	Time      string `xml:"time,attr"`
-	Failure   string `xml:"failure,omitempty"`
+	Name      string            `xml:"name,attr"`
+	SuiteName string            `xml:"classname,attr"`
+	Time      string            `xml:"time,attr"`
+	Failure   string            `xml:"failure,omitempty"`
+	Skipped   *xml.Name         `xml:"skipped,omitempty"`
+	Flaky     *jUnitFlakyFailure `xml:"flakyFailure,omitempty"`
 }
 type jUnitSuiteReport struct {
 	Name        string            `xml:"name,attr"`
@@ -60,6 +66,12 @@ func generateXMLReport(report RunReport) []byte {
 			jUnitTest.SuiteName = suite.SuiteName
 			if test.Result == TestFailed {
 				jUnitTest.Failure = string(test.AllOutput)
+			} else if test.Result == TestFlaky {
+				jFlaky := new(jUnitFlakyFailure)
+				jFlaky.StackTrace = string(test.LastFailureOutput)
+				jUnitTest.Flaky = jFlaky
+			} else if test.Result == TestCancelled {
+				jUnitTest.Skipped = new(xml.Name)
 			}
 			jUnitSuite.TestReports = append(jUnitSuite.TestReports, jUnitTest)
 		}

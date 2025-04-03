@@ -8,6 +8,7 @@ const (
 	TestSuccess TestResult = iota
 	TestCancelled
 	TestFailed
+	TestFlaky
 )
 
 type TestReport struct {
@@ -15,6 +16,8 @@ type TestReport struct {
 	TestName  string
 	Time      time.Duration
 	AllOutput []byte
+	// This may be null, if no LastFailure
+	LastFailureOutput []byte
 	// Maybe...
 	// StdOuput []byte
 	// StdErr []byte
