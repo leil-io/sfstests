@@ -17,6 +17,7 @@ type jUnitTestReport struct {
 	Name      string              `xml:"name,attr"`
 	SuiteName string              `xml:"classname,attr"`
 	Time      string              `xml:"time,attr"`
+	Failed    *xml.Name           `xml:"failure,omitempty"`
 	Output    string              `xml:"system-out,omitempty"`
 	Skipped   *xml.Name           `xml:"skipped,omitempty"`
 
@@ -119,6 +120,7 @@ func buildjUnitTestReport(test TestReport, suite string) (jUnitTest jUnitTestRep
 					)
 			} else if !flaky && i == 0 {
 				// First failed output must be a normal failure
+				jUnitTest.Failed = new(xml.Name)
 				jUnitTest.Output = string(run.AllOutput)
 			} else if !flaky && i != 0 {
 				jUnitTest.NotFlaky = append(
@@ -130,6 +132,7 @@ func buildjUnitTestReport(test TestReport, suite string) (jUnitTest jUnitTestRep
 	} else {
 		run := test.Runs[0]
 		if run.Result == TestFailed {
+			jUnitTest.Failed = new(xml.Name)
 			jUnitTest.Output = string(run.AllOutput)
 		} else if run.Result == TestCancelled {
 			jUnitTest.Skipped = new(xml.Name)
