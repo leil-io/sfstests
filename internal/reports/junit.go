@@ -9,9 +9,6 @@ import (
 	"leil.io/sfstests/internal/utils"
 )
 
-type jUnitFlakyFailure struct {
-	SystemOut string `xml:"stackTrace"`
-}
 
 type jUnitTestReport struct {
 	Name      string              `xml:"name,attr"`
@@ -25,9 +22,9 @@ type jUnitTestReport struct {
 	// used by some plugins on Jenkins.
 
 	// This is empty when there were flakes detected
-	NotFlaky  []jUnitFlakyFailure `xml:"rerunFailure,omitempty"`
+	NotFlaky  []string `xml:"rerunFailure,omitempty"`
 	// This is empty when there were no flakes detected
-	Flaky     []jUnitFlakyFailure `xml:"flakyFailure,omitempty"`
+	Flaky     []string `xml:"flakyFailure,omitempty"`
 
 	// Thanks a lot Maven for your consistency
 }
@@ -115,7 +112,7 @@ func buildjUnitTestReport(test TestReport, suite string) (jUnitTest jUnitTestRep
 			} else if flaky && run.Result == TestFailed {
 				jUnitTest.Flaky = append(
 					jUnitTest.Flaky,
-					jUnitFlakyFailure{SystemOut: string(run.AllOutput)},
+					string(run.AllOutput),
 					)
 			} else if !flaky && i == 0 {
 				// First failed output must be a normal failure
@@ -123,7 +120,7 @@ func buildjUnitTestReport(test TestReport, suite string) (jUnitTest jUnitTestRep
 			} else if !flaky && i != 0 {
 				jUnitTest.NotFlaky = append(
 					jUnitTest.NotFlaky,
-					jUnitFlakyFailure{SystemOut: string(run.AllOutput)},
+					string(run.AllOutput),
 				)
 			}
 		}

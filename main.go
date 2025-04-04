@@ -217,7 +217,9 @@ func printTestResults(report reports.SuiteReport, options utils.TestOptions) int
 		if !result {
 			exitCode = 2
 		}
-		fmt.Println(output)
+		if output != "" {
+			fmt.Println(output)
+		}
 	}
 	return exitCode
 }
