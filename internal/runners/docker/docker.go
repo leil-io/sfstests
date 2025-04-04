@@ -57,8 +57,8 @@ func (runner *DockerRunner) Setup(options utils.TestOptions, ctx context.Context
 	}
 }
 
-func (runner *DockerRunner) RunTest(suite string, name string, ctx context.Context) reports.TestReport {
-	report := reports.TestReport {
+func (runner *DockerRunner) RunTest(suite string, name string, ctx context.Context) reports.TestRunReport {
+	report := reports.TestRunReport {
 		Result: reports.TestCancelled,
 		TestName: name,
 	}

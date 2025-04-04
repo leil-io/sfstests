@@ -23,7 +23,7 @@ type Test struct {
 	Ctx       context.Context
 	CancelRun context.CancelFunc
 	Runner    Runner
-	Report    reports.TestReport
+	Runs   []reports.TestRunReport
 }
 
 type Config struct {
@@ -35,7 +35,7 @@ type Config struct {
 
 type Runner interface {
 	Setup(options utils.TestOptions, ctx context.Context)
-	RunTest(suite string, name string, ctx context.Context) reports.TestReport
+	RunTest(suite string, name string, ctx context.Context) reports.TestRunReport
 	// 'name' must handle wildcard (*) pattern
 	GetTests(name string, ctx context.Context) (tests map[string][]string)
 	Cleanup(ctx context.Context)
@@ -121,34 +121,59 @@ func compileSuiteReport(tests []*Test, options utils.TestOptions) reports.RunRep
 	suiteRep := reports.SuiteReport{}
 	suiteRep.SuiteName = options.Suite
 	for _, test := range tests {
-		suiteRep.TestReports = append(suiteRep.TestReports, test.Report)
+		testReport := reports.TestReport{}
+		for _, run := range test.Runs {
+			testReport.Runs = append(testReport.Runs, run)
+		}
+		suiteRep.TestReports = append(suiteRep.TestReports, testReport)
 	}
 	runRep.SuiteReports = append(runRep.SuiteReports, suiteRep)
 	return runRep
+}
+
+// Returns true on first success, and final amount of tries
+// Should be called after a failure and if flakes is set
+func testFlakiness(amountOfRetries int, job *Test) (bool, int) {
+	for testTries := 2; testTries <= amountOfRetries; testTries++ {
+		log.Printf("Rerunning test %s again (%v/%v)",
+			job.Name,
+			testTries,
+			amountOfRetries,
+			)
+		report := job.Runner.RunTest(job.TestSuite, job.Name, job.Ctx)
+		if report.Result == reports.TestSuccess {
+			job.Runs = append(job.Runs, report)
+			return true, testTries
+		} else if report.Result == reports.TestFailed {
+			log.Printf("Test %s FAILED AGAIN (%v/%v)",
+				job.Name,
+				testTries,
+				amountOfRetries,
+			)
+		}
+		job.Runs = append(job.Runs, report)
+	}
+	return false, amountOfRetries
 }
 
 func testWorker(jobs <-chan *Test, wg *sync.WaitGroup, options utils.TestOptions) {
 	defer wg.Done()
 
 	for job := range jobs {
-		job.Report = job.Runner.RunTest(job.TestSuite, job.Name, job.Ctx)
-		if job.Report.Result == reports.TestFailed {
+		report := job.Runner.RunTest(job.TestSuite, job.Name, job.Ctx)
+		job.Runs = append(job.Runs, report)
+		if report.Result == reports.TestFailed {
 			// TODO(Urmas): Clean this mess up
 			if options.Flakes > 1 {
-				for testTries := 2; testTries <= options.Flakes; testTries++ {
-					log.Printf("Test %s failed initially, retrying to see if it's flaky (%v/%v)", job.Name, testTries, options.Flakes)
-					lastFailure := job.Report.AllOutput
-					job.Report = job.Runner.RunTest(job.TestSuite, job.Name, job.Ctx)
-					job.Report.LastFailureOutput = lastFailure
-					if job.Report.Result == reports.TestSuccess {
-						log.Printf("Test %s passed when it failed before, considered FLAKY (%v/%v)", job.Name, testTries, options.Flakes)
-						job.Report.Result = reports.TestFlaky
-						break
-					} else if job.Report.Result == reports.TestFailed {
-						log.Printf("Test %s finished: FAILED (%v/%v)", job.Name, testTries, options.Flakes)
-					}
-				}
-				if job.Report.Result == reports.TestFlaky {
+				log.Printf("Test %s failed initially, retrying to see if it's flaky",
+					job.Name,
+				)
+				if flaky, tries := testFlakiness(options.Flakes, job); flaky {
+					log.Printf("Test %s passed when it failed before, considered FLAKY (%v/%v)",
+						job.Name,
+						tries,
+						options.Flakes,
+					)
 					continue
 				}
 			} else {
@@ -158,7 +183,7 @@ func testWorker(jobs <-chan *Test, wg *sync.WaitGroup, options utils.TestOptions
 				log.SetOutput(io.Discard)
 				job.CancelRun()
 			}
-		} else if job.Report.Result == reports.TestSuccess {
+		} else if report.Result == reports.TestSuccess {
 			log.Printf("Test %s finished: OK", job.Name)
 		}
 	}
@@ -168,26 +193,14 @@ func testWorker(jobs <-chan *Test, wg *sync.WaitGroup, options utils.TestOptions
 func printTestResults(report reports.SuiteReport, options utils.TestOptions) int {
 	exitCode := 0
 	for _, test := range report.TestReports {
-		if test.Result == reports.TestSuccess {
-			fmt.Printf("TEST %s: OK\n", test.TestName)
-			if options.Workers > 1 && options.AllOutput {
-				fmt.Printf("- %s OUTPUT -\n", test.TestName)
-				fmt.Printf("%s\n", string(test.AllOutput))
-				fmt.Printf("- END OUTPUT -\n")
-			}
+		output, result := test.Results(options.AllOutput)
+		if !result {
+			exitCode = 2
 		}
-	}
-	// Go through the tests twice, to keep things ordered.
-	for _, test := range report.TestReports {
-		if test.Result == reports.TestFailed {
-			fmt.Printf("TEST %s: FAILED\n", test.TestName)
-			if !options.AllOutput || options.Workers > 1 {
-				fmt.Printf("- %s OUTPUT -\n", test.TestName)
-				fmt.Printf("%s\n", string(test.AllOutput))
-				fmt.Printf("- END OUTPUT -\n")
-			}
-			exitCode = 1
+		if options.AllOutput && options.Workers < 2 {
+			continue
 		}
+		fmt.Println(output)
 	}
 	return exitCode
 }

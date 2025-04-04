@@ -10,17 +10,28 @@ import (
 )
 
 type jUnitFlakyFailure struct {
-	StackTrace string `xml:"stackTrace"`
+	SystemOut string `xml:"system-out"`
 }
 
 type jUnitTestReport struct {
-	Name      string            `xml:"name,attr"`
-	SuiteName string            `xml:"classname,attr"`
-	Time      string            `xml:"time,attr"`
-	Failure   string            `xml:"failure,omitempty"`
-	Skipped   *xml.Name         `xml:"skipped,omitempty"`
-	Flaky     *jUnitFlakyFailure `xml:"flakyFailure,omitempty"`
+	Name      string              `xml:"name,attr"`
+	SuiteName string              `xml:"classname,attr"`
+	Time      string              `xml:"time,attr"`
+	Output    string              `xml:"system-out,omitempty"`
+	Skipped   *xml.Name           `xml:"skipped,omitempty"`
+
+	// The reason why this has two fields of the same type has to do with
+	// getting it compatible with Maven's surefire flaky tests, which is
+	// used by some plugins on Jenkins.
+
+	// This is empty when there were flakes detected
+	NotFlaky  []jUnitFlakyFailure `xml:"rerunFailure,omitempty"`
+	// This is empty when there were no flakes detected
+	Flaky     []jUnitFlakyFailure `xml:"flakyFailure,omitempty"`
+
+	// Thanks a lot Maven for your consistency
 }
+
 type jUnitSuiteReport struct {
 	Name        string            `xml:"name,attr"`
 	Time        string            `xml:"time,attr"`
@@ -35,7 +46,8 @@ type jUnitFullReport struct {
 func calculateSuiteTime(suiteReport SuiteReport) time.Duration {
 	var suiteTime time.Duration = 0
 	for _, test := range suiteReport.TestReports {
-		suiteTime += test.Time
+		// Take the last time
+		suiteTime += test.Runs[len(test.Runs) - 1].Time
 	}
 	return suiteTime
 }
@@ -55,30 +67,73 @@ func WriteXMLReport(writer io.Writer, report RunReport) {
 
 func generateXMLReport(report RunReport) []byte {
 	var jUnitReport jUnitFullReport
+
 	for _, suite := range report.SuiteReports {
 		var jUnitSuite jUnitSuiteReport
 		jUnitSuite.Name = suite.SuiteName
 		jUnitSuite.Time = strconv.FormatFloat(calculateSuiteTime(suite).Seconds(), 'f', -1, 64)
 		for _, test := range suite.TestReports {
-			var jUnitTest jUnitTestReport
-			jUnitTest.Name = test.TestName
-			jUnitTest.Time = strconv.FormatFloat(test.Time.Seconds(), 'f', -1, 64)
-			jUnitTest.SuiteName = suite.SuiteName
-			if test.Result == TestFailed {
-				jUnitTest.Failure = string(test.AllOutput)
-			} else if test.Result == TestFlaky {
-				jFlaky := new(jUnitFlakyFailure)
-				jFlaky.StackTrace = string(test.LastFailureOutput)
-				jUnitTest.Flaky = jFlaky
-			} else if test.Result == TestCancelled {
-				jUnitTest.Skipped = new(xml.Name)
-			}
-			jUnitSuite.TestReports = append(jUnitSuite.TestReports, jUnitTest)
+			jUnitSuite.TestReports = append(jUnitSuite.TestReports, buildjUnitTestReport(test, suite.SuiteName))
 		}
 		jUnitReport.TestSuites = append(jUnitReport.TestSuites, jUnitSuite)
 	}
+
 	jUnitReport.Time = strconv.FormatFloat(calculateFullTime(report).Seconds(), 'f', -1, 64)
 	output, err := xml.MarshalIndent(jUnitReport, " ", "  ")
 	utils.PanicIfErr(err)
 	return append([]byte(xml.Header), output...)
+}
+
+func buildjUnitTestReport(test TestReport, suite string) (jUnitTest jUnitTestReport) {
+	flaky := test.IsFlaky()
+	jUnitTest.Name = test.Name
+	jUnitTest.SuiteName = suite
+
+	if flaky {
+		// Take last time
+		jUnitTest.Time = strconv.FormatFloat(
+			test.Runs[len(test.Runs)-1].Time.Seconds(),
+			'f',
+			-1,
+			64,
+		)
+	} else {
+		// Take first time
+		jUnitTest.Time = strconv.FormatFloat(
+			test.Runs[0].Time.Seconds(),
+			'f',
+			-1,
+			64,
+		)
+	}
+
+	if len(test.Runs) > 1 {
+		for i, run := range test.Runs {
+			if run.Result == TestCancelled {
+				jUnitTest.Skipped = new(xml.Name)
+				break
+			} else if flaky && run.Result == TestFailed {
+				jUnitTest.Flaky = append(
+					jUnitTest.Flaky,
+					jUnitFlakyFailure{SystemOut: string(run.AllOutput)},
+					)
+			} else if !flaky && i == 0 {
+				// First failed output must be a normal failure
+				jUnitTest.Output = string(run.AllOutput)
+			} else if !flaky && i != 0 {
+				jUnitTest.NotFlaky = append(
+					jUnitTest.NotFlaky,
+					jUnitFlakyFailure{SystemOut: string(run.AllOutput)},
+				)
+			}
+		}
+	} else {
+		run := test.Runs[0]
+		if run.Result == TestFailed {
+			jUnitTest.Output = string(run.AllOutput)
+		} else if run.Result == TestCancelled {
+			jUnitTest.Skipped = new(xml.Name)
+		}
+	}
+	return jUnitTest
 }
