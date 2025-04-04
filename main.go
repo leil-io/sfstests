@@ -122,8 +122,19 @@ func compileSuiteReport(tests []*Test, options utils.TestOptions) reports.RunRep
 	suiteRep.SuiteName = options.Suite
 	for _, test := range tests {
 		testReport := reports.TestReport{}
-		for _, run := range test.Runs {
-			testReport.Runs = append(testReport.Runs, run)
+		testReport.Name = test.Name
+		if len(test.Runs) == 0 {
+			testReport.Runs = append(
+				testReport.Runs,
+				reports.TestRunReport{
+					TestName: test.Name,
+					Result:   reports.TestCancelled,
+				},
+			)
+		} else {
+			for _, run := range test.Runs {
+				testReport.Runs = append(testReport.Runs, run)
+			}
 		}
 		suiteRep.TestReports = append(suiteRep.TestReports, testReport)
 	}
@@ -193,12 +204,18 @@ func testWorker(jobs <-chan *Test, wg *sync.WaitGroup, options utils.TestOptions
 func printTestResults(report reports.SuiteReport, options utils.TestOptions) int {
 	exitCode := 0
 	for _, test := range report.TestReports {
-		output, result := test.Results(options.AllOutput)
-		if !result {
-			exitCode = 2
-		}
+		// First OK tests
+		output := test.OKResults(options.AllOutput)
 		if options.AllOutput && options.Workers < 2 {
 			continue
+		}
+		fmt.Println(output)
+	}
+	for _, test := range report.TestReports {
+		// Then failed tests
+		output, result := test.FailedResults(!options.AllOutput || options.Workers > 2)
+		if !result {
+			exitCode = 2
 		}
 		fmt.Println(output)
 	}

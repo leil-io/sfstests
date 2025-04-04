@@ -53,10 +53,9 @@ func (testReport *TestReport) IsFlaky() bool {
 	return failedOnce && passedOnce
 }
 
-func (testReport *TestReport) Results(printAll bool) (string, bool) {
+func (testReport *TestReport) OKResults(printAll bool) string {
 	strOutput := ""
-	anyFailed := false
-	// Check for passing tests first
+
 	for i, test := range testReport.Runs {
 		if test.Result == TestSuccess {
 			if len(testReport.Runs) == 1 {
@@ -75,8 +74,14 @@ func (testReport *TestReport) Results(printAll bool) (string, bool) {
 			}
 		}
 	}
+	return strOutput
+}
 
-	// Now add failing tests at the end
+// Returns true if any test failed
+func (testReport *TestReport) FailedResults(printAll bool) (string, bool) {
+	strOutput := ""
+	anyFailed := false
+
 	for i, test := range testReport.Runs {
 		if test.Result == TestFailed {
 			if len(testReport.Runs) == 1 {
@@ -88,10 +93,12 @@ func (testReport *TestReport) Results(printAll bool) (string, bool) {
 					len(testReport.Runs),
 				)
 			}
-			strOutput += fmt.Sprintf("TEST %s: FAILED\n", test.TestName)
-			strOutput += fmt.Sprintf("- %s OUTPUT -\n", test.TestName)
-			strOutput += fmt.Sprintf("%s\n", string(test.AllOutput))
-			strOutput += fmt.Sprintf("- END OUTPUT -\n")
+			if printAll {
+				strOutput += fmt.Sprintf("TEST %s: FAILED\n", test.TestName)
+				strOutput += fmt.Sprintf("- %s OUTPUT -\n", test.TestName)
+				strOutput += fmt.Sprintf("%s\n", string(test.AllOutput))
+				strOutput += fmt.Sprintf("- END OUTPUT -\n")
+			}
 			anyFailed = true
 		}
 	}
