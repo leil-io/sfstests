@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -98,7 +99,7 @@ func runTests(ctx context.Context, options utils.TestOptions, runner Runner, can
 		}
 	}
 
-	if ctx.Err() != nil && options.SkipTestsOnFail {
+	if (options.SkipTestsOnFail && options.XMLPath == "") && errors.Is(ctx.Err(), context.Canceled) {
 		return 2
 	} else {
 		return exitCode
