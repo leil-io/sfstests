@@ -43,51 +43,67 @@ type Runner interface {
 }
 
 func runTests(ctx context.Context, options utils.TestOptions, runner Runner, cancel context.CancelFunc) int {
+	runRep := reports.RunReport{}
+
+	suites := strings.Split(options.Suite, ",")
 	runner.Setup(options, ctx)
 	testNames := runner.GetTests(options.TestPattern, ctx)
-	suite, ok := testNames[options.Suite]
-	if !ok {
-		fmt.Fprintf(os.Stderr, "Test suite %s not found, these suites are available:\n", options.Suite)
-		for key := range testNames {
-			fmt.Fprintf(os.Stderr, "%s\n", key)
+	for _, suite := range suites {
+		testSuite, ok := testNames[suite]
+		if !ok {
+			fmt.Fprintf(os.Stderr, "Test suite %s not found, these suites are available:\n", options.Suite)
+			for key := range testNames {
+				fmt.Fprintf(os.Stderr, "%s\n", key)
+			}
+			return 3
 		}
-		return 3
-	}
 
-	jobs := make(chan *Test, len(suite))
-	tests := make([]*Test, 0, len(suite))
+		jobs := make(chan *Test, len(testSuite))
+		tests := make([]*Test, 0, len(testSuite))
 
-	var wg sync.WaitGroup
+		var wg sync.WaitGroup
 
-	log.Printf("Using %v workers\n", options.Workers)
-	for range options.Workers {
-		wg.Add(1)
-		go testWorker(jobs, &wg, options)
-	}
-
-	for _, testName := range suite {
-		if options.AuthFile == "" && strings.Contains(testName, "test_upgrade") {
-			log.Printf("Skipping test %s", testName)
-			continue
+		log.Printf("Using %v workers\n", options.Workers)
+		for range options.Workers {
+			wg.Add(1)
+			go testWorker(jobs, &wg, options)
 		}
-		test := &Test{
-			Name:      testName,
-			TestSuite: options.Suite,
-			Ctx:       ctx,
-			CancelRun: cancel,
-			Runner:    runner,
+
+		for _, testName := range testSuite {
+			if options.AuthFile == "" && strings.Contains(testName, "test_upgrade") {
+				log.Printf("Skipping test %s", testName)
+				continue
+			}
+			test := &Test{
+				Name:      testName,
+				TestSuite: options.Suite,
+				Ctx:       ctx,
+				CancelRun: cancel,
+				Runner:    runner,
+			}
+			jobs <- test
+			tests = append(tests, test)
 		}
-		jobs <- test
-		tests = append(tests, test)
+		close(jobs)
+		wg.Wait()
+		log.Println("All tests finished")
+		runner.Cleanup(ctx)
+		suiteRep := compileSuiteReport(tests, options)
+		runRep.SuiteReports = append(runRep.SuiteReports, suiteRep)
+		if errors.Is(ctx.Err(), context.Canceled) {
+			break
+		}
 	}
-	close(jobs)
-	wg.Wait()
-	log.Println("All tests finished")
-	runner.Cleanup(ctx)
-	runRep := compileSuiteReport(tests, options)
 
 	// TODO(Urmas): Currently only one suite can be run at a time.
-	exitCode := printTestResults(runRep.SuiteReports[0], options)
+	exitCode := 0
+	for _, suite := range runRep.SuiteReports {
+		fmt.Printf("\n\nTest suite %s\n\n", suite.SuiteName)
+		status := printTestResults(suite, options)
+		if status > 0 && exitCode == 0 {
+			exitCode = status
+		}
+	}
 	if options.XMLPath != "" {
 		err := writeXMLReportToFile(options.XMLPath, runRep)
 		if err != nil {
@@ -117,8 +133,7 @@ func writeXMLReportToFile(path string, report reports.RunReport) error {
 	return nil
 }
 
-func compileSuiteReport(tests []*Test, options utils.TestOptions) reports.RunReport {
-	runRep := reports.RunReport{}
+func compileSuiteReport(tests []*Test, options utils.TestOptions) reports.SuiteReport {
 	suiteRep := reports.SuiteReport{}
 	suiteRep.SuiteName = options.Suite
 	for _, test := range tests {
@@ -139,8 +154,7 @@ func compileSuiteReport(tests []*Test, options utils.TestOptions) reports.RunRep
 		}
 		suiteRep.TestReports = append(suiteRep.TestReports, testReport)
 	}
-	runRep.SuiteReports = append(runRep.SuiteReports, suiteRep)
-	return runRep
+	return suiteRep
 }
 
 // Returns true on first success, and final amount of tries
@@ -201,7 +215,7 @@ func testWorker(jobs <-chan *Test, wg *sync.WaitGroup, options utils.TestOptions
 	}
 }
 
-// Print results of tests and return 1 if at least one test failed, otherwise 0
+// Print results of a single suite and return 1 if at least one test failed, otherwise 0
 func printTestResults(report reports.SuiteReport, options utils.TestOptions) int {
 	exitCode := 0
 	for _, test := range report.TestReports {
