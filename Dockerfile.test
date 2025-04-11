@@ -2,38 +2,60 @@ ARG BASE_IMAGE=ubuntu:24.04
 
 ### Test env phase
 FROM ${BASE_IMAGE} AS test-setup
+ARG BASE_IMAGE=ubuntu:24.04
 
 ENV LC_ALL="C.UTF-8"
 ENV GTEST_ROOT=/usr/local
 ENV DEBIAN_FRONTEND=noninteractive
 
+WORKDIR /saunafs
+COPY ./tests/install-packages.sh ./tests/
+COPY ./tests/llvm.sh ./tests/
 RUN --mount=target=/var/lib/apt/lists,type=cache,sharing=locked \
     --mount=target=/var/cache/apt,type=cache,sharing=locked \
-    apt-get update && \
-    apt-get install --yes \
-        lcov \
-        tini build-essential libblkid-dev libboost-filesystem-dev libboost-iostreams-dev libboost-program-options-dev libboost-system-dev libcrcutil-dev libdb-dev libfmt-dev libfuse3-dev libgoogle-perftools-dev libgtest-dev libisal-dev libjudy-dev libpam0g-dev libspdlog-dev libsystemd-dev libthrift-dev libtirpc-dev liburcu-dev libyaml-cpp-dev netcat-openbsd python3-venv uuid-dev zlib1g-dev docbook docbook-xml krb5-user libacl1-dev libcap-dev libcephfs-dev libdbus-1-dev libglusterfs-dev libgssapi-krb5-2 libjemalloc-dev libkrb5-dev libkrb5support0 libnfsidmap-dev libradospp-dev libradosstriper-dev librgw-dev libsqlite3-dev xfslibs-dev \
-        acl asciidoc attr automake bash-completion bc ccache cmake curl dbench debhelper devscripts fakeroot fio fuse3 gcc git gnupg2 kmod lcov make nfs4-acl-tools pkg-config pylint python3-pip python3-setuptools python3-wheel psmisc rsync rsyslog socat sudo tidy time valgrind wget bison byacc ceph dbus doxygen flex tree
+    rm -f /etc/apt/apt.conf.d/docker-clean && \
+	apt-get update && apt-get install tini && \
+    ./tests/install-packages.sh;
 
-
-WORKDIR /saunafs
 COPY ./tests/setup_machine.sh ./tests/
 
 # Run the setup-test-machine.sh script
 RUN --mount=target=/var/lib/apt/lists,type=cache,sharing=locked \
     --mount=target=/var/cache/apt,type=cache,sharing=locked \
     rm -f /etc/apt/apt.conf.d/docker-clean && \
-    apt-get update && \
-    ./tests/setup_machine.sh setup /mnt/hdd_0 /mnt/hdd_1 /mnt/hdd_2 /mnt/hdd_3 /mnt/hdd_4 /mnt/hdd_5 /mnt/hdd_6 /mnt/hdd_7 || true
+    ./tests/setup_machine.sh setup /mnt/hdd_0 /mnt/hdd_1 /mnt/hdd_2 /mnt/hdd_3 /mnt/hdd_4 /mnt/hdd_5 /mnt/hdd_6 /mnt/hdd_7 || true;
 
-RUN mkdir -p /mnt/hdd_0/ /mnt/hdd_1/ /mnt/hdd_2/ /mnt/hdd_3/ /mnt/hdd_4/ /mnt/hdd_5/ /mnt/hdd_6/ /mnt/hdd_7/
-RUN chown saunafstest:saunafstest -R /mnt/hdd_*
+RUN mkdir -p /mnt/hdd_0/ /mnt/hdd_1/ /mnt/hdd_2/ /mnt/hdd_3/ /mnt/hdd_4/ /mnt/hdd_5/ /mnt/hdd_6/ /mnt/hdd_7/;
+RUN chown saunafstest:saunafstest -R /mnt/hdd_*;
+
+RUN if [ "$BASE_IMAGE" = "ubuntu:22.04" ]; then \
+        apt --yes update; \
+        apt --yes install -y gcc-12 g++-12;    \
+        ln -s -f /usr/bin/gcc-12 /usr/bin/gcc; \
+        ln -s -f /usr/bin/g++-12 /usr/bin/g++; \
+fi;
 
 ### Build Phase
 FROM test-setup AS test-build
 
 # Enable additional basic tools
 ENV PATH="/usr/lib/ccache:${PATH}"
+
+WORKDIR /
+RUN git clone https://github.com/microsoft/vcpkg.git /vcpkg;
+WORKDIR /vcpkg
+RUN git checkout 9b75e789ece3f942159b8500584e35aafe3979ff;
+RUN ./bootstrap-vcpkg.sh;
+ENV VCPKG_ROOT="/vcpkg/"
+ENV PATH="${VCPKG_ROOT}:${PATH}"
+
+WORKDIR /saunafs
+COPY vcpkg.json .
+RUN --mount=type=cache,target=/root/.ccache \
+	--mount=type=cache,target=/root/.cache/vcpkg \
+	--mount=type=cache,target=/vcpkg/downloads/,sharing=locked \
+	--mount=type=cache,target=/vcpkg/packages/,sharing=locked \
+	vcpkg --debug install;
 
 COPY CMakeLists.txt .
 COPY cmake ./cmake
@@ -46,11 +68,29 @@ COPY tests ./tests
 COPY COPYING .
 COPY README.md .
 
-RUN --mount=type=cache,target=/saunafs/build/,sharing=locked --mount=type=cache,target=/root/.ccache \
-    mkdir -p /saunafs/build && ls /saunafs && \
-    cd /saunafs/build && cmake -DENABLE_TESTS=1 .. && make -j$(nproc) install
+RUN --mount=type=cache,target=/root/.ccache \
+	--mount=type=cache,target=/root/.cache/vcpkg \
+	--mount=type=cache,target=/vcpkg/downloads/,sharing=locked \
+	--mount=type=cache,target=/vcpkg/packages/,sharing=locked \
+	mkdir -p /saunafs/build && ls /saunafs && \
+    cd /saunafs/build && cmake \
+	-DCMAKE_TOOLCHAIN_FILE="/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+    -DENABLE_TESTS=1 \
+    -DENABLE_DOCS=1 \
+    -DENABLE_NFS_GANESHA=1 \
+    -DENABLE_CLIENT_LIB=ON \
+    -DENABLE_URAFT=ON \
+    -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+	-DCMAKE_INSTALL_PREFIX=/install \
+    ..;
 
+# TODO: Use CMake presets
+RUN --mount=type=cache,target=/root/.ccache \
+    cd /saunafs/build && make -j$(nproc) install;
 
 WORKDIR /
 ENV TERM=xterm
+ENV SAUNAFS_ROOT="/install"
+ENV PATH="$PATH:$SAUNAFS_ROOT/bin:$SAUNAFS_ROOT/sbin"
+ENV MANPATH=":/saunafs/share/man"
 ENTRYPOINT ["tini", "--"]

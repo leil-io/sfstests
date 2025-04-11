@@ -51,11 +51,11 @@ func runTests(ctx context.Context, options utils.TestOptions, runner Runner, can
 	for _, suite := range suites {
 		testSuite, ok := testNames[suite]
 		if !ok {
-			fmt.Fprintf(os.Stderr, "Test suite %s not found, these suites are available:\n", options.Suite)
+			fmt.Fprintf(os.Stderr, "Test suite %s not found, these suites are available:\n", suite)
 			for key := range testNames {
 				fmt.Fprintf(os.Stderr, "%s\n", key)
 			}
-			return 3
+			continue
 		}
 
 		jobs := make(chan *Test, len(testSuite))
@@ -76,7 +76,7 @@ func runTests(ctx context.Context, options utils.TestOptions, runner Runner, can
 			}
 			test := &Test{
 				Name:      testName,
-				TestSuite: options.Suite,
+				TestSuite: suite,
 				Ctx:       ctx,
 				CancelRun: cancel,
 				Runner:    runner,
@@ -88,17 +88,16 @@ func runTests(ctx context.Context, options utils.TestOptions, runner Runner, can
 		wg.Wait()
 		log.Println("All tests finished")
 		runner.Cleanup(ctx)
-		suiteRep := compileSuiteReport(tests, options)
+		suiteRep := compileSuiteReport(suite, tests)
 		runRep.SuiteReports = append(runRep.SuiteReports, suiteRep)
 		if errors.Is(ctx.Err(), context.Canceled) {
 			break
 		}
 	}
 
-	// TODO(Urmas): Currently only one suite can be run at a time.
 	exitCode := 0
 	for _, suite := range runRep.SuiteReports {
-		fmt.Printf("\n\nTest suite %s\n\n", suite.SuiteName)
+		fmt.Printf("\n\nSUITE %s\n\n", suite.SuiteName)
 		status := printTestResults(suite, options)
 		if status > 0 && exitCode == 0 {
 			exitCode = status
@@ -133,9 +132,9 @@ func writeXMLReportToFile(path string, report reports.RunReport) error {
 	return nil
 }
 
-func compileSuiteReport(tests []*Test, options utils.TestOptions) reports.SuiteReport {
+func compileSuiteReport(suiteName string, tests []*Test) reports.SuiteReport {
 	suiteRep := reports.SuiteReport{}
-	suiteRep.SuiteName = options.Suite
+	suiteRep.SuiteName = suiteName
 	for _, test := range tests {
 		testReport := reports.TestReport{}
 		testReport.Name = test.Name
@@ -229,7 +228,7 @@ func printTestResults(report reports.SuiteReport, options utils.TestOptions) int
 	for _, test := range report.TestReports {
 		// Then failed tests
 		output, result := test.FailedResults(!options.AllOutput || options.Workers > 2)
-		if !result {
+		if result {
 			exitCode = 2
 		}
 		if output != "" {
