@@ -214,8 +214,8 @@ func printTestResults(report reports.SuiteReport, options utils.TestOptions) int
 	}
 	for _, test := range report.TestReports {
 		// Then failed tests
-		output, result := test.FailedResults(!options.AllOutput || options.Workers > 2)
-		if !result {
+		output, failed := test.FailedResults(!options.AllOutput || options.Workers > 2)
+		if failed {
 			exitCode = 2
 		}
 		if output != "" {
