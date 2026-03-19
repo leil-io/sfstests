@@ -1,8 +1,8 @@
-# sfstests - A way to quickly run SaunaFS tests locally on any machine
+# lfstests - A way to quickly run LeilFS tests locally on any machine
 
 ## Rationale
 
-SaunaFS testing framework is quite powerful, however it has significant
+LeilFS testing framework is quite powerful, however it has significant
 drawbacks, two of which are developing on non-Ubuntu machines (and tests
 requiring significant modification to the local machine). It also has the problem
 of tests taking too long, with ShortSystemTests taking up to an hour, and
@@ -20,7 +20,7 @@ cores)
 
 A docker image is provided to help build the image used. Currently, the tool
 doesn't build it, so you'll have to manually build it with something like this
-(assuming working directory is saunafs source directory):
+(assuming working directory is leilfs source directory):
 
 ```bash
 docker buildx build --tag saunafs-test:latest -f tests/sfstests/Dockerfile.test .

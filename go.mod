@@ -1,4 +1,4 @@
-module leil.io/sfstests
+module leil.io/lfstests
 
 go 1.22.2
 
