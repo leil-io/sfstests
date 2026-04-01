@@ -70,7 +70,7 @@ func (options *TestOptions) SetupFromFlags() {
 	flag.BoolVar(&options.DeleteContainers, "delete", false, "Delete all containers regardless if they failed or not")
 
 	flag.StringVar(&options.MountPoint, longToShort["mount"], "", "shorthand for -mount")
-	flag.StringVar(&options.MountPoint, "mount", "", "SaunaFS git repository to mount (must be full path)")
+	flag.StringVar(&options.MountPoint, "mount", "", "LeilFS git repository to mount (must be full path)")
 
 	flag.StringVar(&options.CoreMount, "core-mount", "", "Mount place for cores")
 	flag.StringVar(&options.AuthFile, "auth", "", "APT auth full path for upgrade tests, otherwise upgrades are skipped")

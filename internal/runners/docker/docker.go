@@ -18,8 +18,8 @@ import (
 	"github.com/docker/docker/errdefs"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-units"
-	"leil.io/sfstests/internal/reports"
-	"leil.io/sfstests/internal/utils"
+	"leil.io/lfstests/internal/reports"
+	"leil.io/lfstests/internal/utils"
 )
 
 const (
