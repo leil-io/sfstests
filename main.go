@@ -13,9 +13,9 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
-	"leil.io/lfstests/internal/reports"
-	"leil.io/lfstests/internal/runners/docker"
-	"leil.io/lfstests/internal/utils"
+	"leil.io/leil-tests/internal/reports"
+	"leil.io/leil-tests/internal/runners/docker"
+	"leil.io/leil-tests/internal/utils"
 )
 
 type Test struct {

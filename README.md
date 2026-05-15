@@ -1,4 +1,4 @@
-# lfstests - A way to quickly run LeilFS tests locally on any machine
+# leil-tests - A way to quickly run LeilFS tests locally on any machine
 
 ## Rationale
 
@@ -23,7 +23,7 @@ doesn't build it, so you'll have to manually build it with something like this
 (assuming working directory is leilfs source directory):
 
 ```bash
-docker buildx build --tag saunafs-test:latest -f tests/sfstests/Dockerfile.test .
+docker buildx build --tag leil-test:latest -f tests/leil-tests/Dockerfile.test .
 ```
 
 **Note the tag used is a requirement**, the tool uses this to find the image to be
@@ -55,7 +55,7 @@ GOBIN=/usr/local/bin/ go install
 ## Usage
 
 ```bash
-sfstests -h
+leil-tests -h
 ```
 
 ## Performance
@@ -68,7 +68,7 @@ application uses the number of logical cores your CPU has, but this can be
 increased by using the -w option
 
 ```bash
-sfstests --workers 50 # Run 50 workers
+leil-tests --workers 50 # Run 50 workers
 ```
 
 ## Environment variables

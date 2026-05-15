@@ -116,7 +116,7 @@ func isShortSet(fs *flag.FlagSet, shortName string) bool {
 }
 
 func flagNameToEnvVar(flagName string) string {
-	envVar := []byte("SFSTESTS_" + strings.ToUpper(flagName))
+	envVar := []byte("LEILTESTS_" + strings.ToUpper(flagName))
 	for i, c := range envVar {
 		if c == '-' {
 			envVar[i] = '_'
