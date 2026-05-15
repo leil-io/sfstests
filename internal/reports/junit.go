@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"time"
 
-	"leil.io/lfstests/internal/utils"
+	"leil.io/leil-tests/internal/utils"
 )
 
 

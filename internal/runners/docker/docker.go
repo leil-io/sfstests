@@ -18,12 +18,12 @@ import (
 	"github.com/docker/docker/errdefs"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-units"
-	"leil.io/lfstests/internal/reports"
-	"leil.io/lfstests/internal/utils"
+	"leil.io/leil-tests/internal/reports"
+	"leil.io/leil-tests/internal/utils"
 )
 
 const (
-	imageName   = "saunafs-test"
+	imageName   = "leil-test"
 	corePattern = "/tmp/temp-cores/core-%e-%p-%t"
 )
 
@@ -58,8 +58,8 @@ func (runner *DockerRunner) Setup(options utils.TestOptions, ctx context.Context
 }
 
 func (runner *DockerRunner) RunTest(suite string, name string, ctx context.Context) reports.TestRunReport {
-	report := reports.TestRunReport {
-		Result: reports.TestCancelled,
+	report := reports.TestRunReport{
+		Result:   reports.TestCancelled,
 		TestName: name,
 	}
 	var output bytes.Buffer
@@ -70,7 +70,7 @@ func (runner *DockerRunner) RunTest(suite string, name string, ctx context.Conte
 
 	filter := fmt.Sprintf("%s.%s", suite, name)
 	gtestFilter := fmt.Sprintf(" --gtest_filter=%s", filter)
-	cmd := "touch /var/log/syslog; chown syslog:syslog /var/log/syslog; rsyslogd; saunafs-tests"
+	cmd := "touch /var/log/syslog; chown syslog:syslog /var/log/syslog; rsyslogd; leil-tests"
 	cmd += gtestFilter
 
 	execConfig := types.ExecConfig{
