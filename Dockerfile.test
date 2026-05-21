@@ -16,7 +16,7 @@ RUN --mount=target=/var/lib/apt/lists,type=cache,sharing=locked \
         acl asciidoc attr automake bash-completion bc ccache cmake curl dbench debhelper devscripts fakeroot fio fuse3 gcc git gnupg2 kmod lcov make nfs4-acl-tools pkg-config pylint python3-pip python3-setuptools python3-wheel psmisc rsync rsyslog socat sudo tidy time valgrind wget bison byacc ceph dbus doxygen flex tree
 
 
-WORKDIR /saunafs
+WORKDIR /leilfs
 COPY ./tests/setup_machine.sh ./tests/
 
 # Run the setup-test-machine.sh script
@@ -46,9 +46,9 @@ COPY tests ./tests
 COPY COPYING .
 COPY README.md .
 
-RUN --mount=type=cache,target=/saunafs/build/,sharing=locked --mount=type=cache,target=/root/.ccache \
-    mkdir -p /saunafs/build && ls /saunafs && \
-    cd /saunafs/build && cmake -DENABLE_TESTS=1 .. && make -j$(nproc) install
+RUN --mount=type=cache,target=/leilfs/build/,sharing=locked --mount=type=cache,target=/root/.ccache \
+    mkdir -p /leilfs/build && ls /leilfs && \
+    cd /leilfs/build && cmake -DENABLE_TESTS=1 .. && make -j$(nproc) install
 
 
 WORKDIR /
