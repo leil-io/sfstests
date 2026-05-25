@@ -15,8 +15,8 @@ RUN --mount=target=/var/lib/apt/lists,type=cache,sharing=locked \
         tini build-essential libblkid-dev libboost-filesystem-dev libboost-iostreams-dev libboost-program-options-dev libboost-system-dev libcrcutil-dev libdb-dev libfmt-dev libfuse3-dev libgoogle-perftools-dev libgtest-dev libisal-dev libjudy-dev libpam0g-dev libspdlog-dev libsystemd-dev libthrift-dev libtirpc-dev liburcu-dev libyaml-cpp-dev netcat-openbsd python3-venv uuid-dev zlib1g-dev docbook docbook-xml krb5-user libacl1-dev libcap-dev libcephfs-dev libdbus-1-dev libglusterfs-dev libgssapi-krb5-2 libjemalloc-dev libkrb5-dev libkrb5support0 libnfsidmap-dev libradospp-dev libradosstriper-dev librgw-dev libsqlite3-dev xfslibs-dev \
         acl asciidoc attr automake bash-completion bc ccache cmake curl dbench debhelper devscripts fakeroot fio fuse3 gcc git gnupg2 kmod lcov make nfs4-acl-tools pkg-config pylint python3-pip python3-setuptools python3-wheel psmisc rsync rsyslog socat sudo tidy time valgrind wget bison byacc ceph dbus doxygen flex tree zonefs-tools
 
-WORKDIR /saunafs
-COPY ./saunafs/tests/setup_machine.sh ./tests/
+WORKDIR /leilfs
+COPY ./leilfs/tests/setup_machine.sh ./tests/
 
 # Run the setup-test-machine.sh script
 RUN --mount=target=/var/lib/apt/lists,type=cache,sharing=locked \
@@ -34,25 +34,25 @@ FROM test-setup AS test-build
 # Enable additional basic tools
 ENV PATH="/usr/lib/ccache:${PATH}"
 
-COPY /saunafs/CMakeLists.txt .
-COPY /saunafs/cmake ./cmake
-COPY /saunafs/config.h.in .
-COPY /saunafs/external ./external
-COPY /saunafs/utils ./utils
-COPY /saunafs/src ./src
-COPY /saunafs/tests/ ./tests
+COPY /leilfs/CMakeLists.txt .
+COPY /leilfs/cmake ./cmake
+COPY /leilfs/config.h.in .
+COPY /leilfs/external ./external
+COPY /leilfs/utils ./utils
+COPY /leilfs/src ./src
+COPY /leilfs/tests/ ./tests
 
 # Copy ZoneFS related code/tests
 COPY /zonefs_disk/zonefs_disk/ ./src/chunkserver/plugins/zonefs_disk
 COPY /zonefs_disk/SMRTests/ ./tests/test_suites/SMRTests
 
-COPY /saunafs/doc ./doc
-COPY /saunafs/COPYING .
-COPY /saunafs/README.md .
+COPY /leilfs/doc ./doc
+COPY /leilfs/COPYING .
+COPY /leilfs/README.md .
 
-RUN --mount=type=cache,target=/saunafs/build/,sharing=locked --mount=type=cache,target=/root/.ccache \
-    mkdir -p /saunafs/build && ls /saunafs && \
-    cd /saunafs/build && cmake -DENABLE_TESTS=1 -DENABLE_DOCS=1 -DENABLE_NFS_GANESHA=1 -DENABLE_CLIENT_LIB=ON -DENABLE_URAFT=ON .. && make -j$(nproc) install
+RUN --mount=type=cache,target=/leilfs/build/,sharing=locked --mount=type=cache,target=/root/.ccache \
+    mkdir -p /leilfs/build && ls /leilfs && \
+    cd /leilfs/build && cmake -DENABLE_TESTS=1 -DENABLE_DOCS=1 -DENABLE_NFS_GANESHA=1 -DENABLE_CLIENT_LIB=ON -DENABLE_URAFT=ON .. && make -j$(nproc) install
 
 
 WORKDIR /

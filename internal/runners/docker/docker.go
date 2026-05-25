@@ -64,7 +64,7 @@ func (runner *DockerRunner) RunTest(suite string, name string, ctx context.Conte
 	}
 	var output bytes.Buffer
 
-	containerName := fmt.Sprintf("saunafs-%s-%s", suite, name)
+	containerName := fmt.Sprintf("leilfs-%s-%s", suite, name)
 	setupContainer(containerName, runner.containerConfig, runner.dockerClient, ctx)
 	log.Println("Running test: " + suite + "/" + name + " in container " + containerName)
 
@@ -187,7 +187,7 @@ func getDefaultHostConfig(options utils.TestOptions) container.HostConfig {
 func setupMounts(options utils.TestOptions, config container.HostConfig) container.HostConfig {
 	if options.MountPoint != "" {
 		config.Mounts = append(config.Mounts, mount.Mount{
-			Type: mount.TypeBind, Source: options.MountPoint, Target: "/saunafs",
+			Type: mount.TypeBind, Source: options.MountPoint, Target: "/leilfs",
 		})
 	}
 	if options.CoreMount != "" {
@@ -282,9 +282,9 @@ func cleanContainer(ctx context.Context, client *client.Client, name string) {
 }
 
 func setCorePattern(original string, containerConfig container.HostConfig, ctx context.Context, client *client.Client) {
-	const name string = "sfs-tmp"
+	const name string = "leil-tmp"
 	setupContainer(name, containerConfig, client, ctx)
-	defer cleanContainer(ctx, client, "sfs-tmp")
+	defer cleanContainer(ctx, client, "leil-tmp")
 
 	execConfig := types.ExecConfig{
 		Cmd:          []string{"bash", "-c", "echo \"" + original + "\" > /proc/sys/kernel/core_pattern"},
@@ -302,7 +302,7 @@ func setCorePattern(original string, containerConfig container.HostConfig, ctx c
 func getSuites(ctx context.Context, client *client.Client, containerName string) map[string][]string {
 	suites := map[string][]string{}
 	execConfig := types.ExecConfig{
-		Cmd:          []string{"bash", "-c", "ls -1 /saunafs/tests/test_suites/"},
+		Cmd:          []string{"bash", "-c", "ls -1 /leilfs/tests/test_suites/"},
 		AttachStdout: true,
 		AttachStderr: true,
 	}
@@ -327,14 +327,14 @@ func getSuites(ctx context.Context, client *client.Client, containerName string)
 }
 
 func getTestGlobs(ctx context.Context, containerConfig container.HostConfig, client *client.Client, options utils.TestOptions) map[string][]string {
-	const name string = "sfs-tmp"
+	const name string = "leil-tmp"
 	setupContainer(name, containerConfig, client, ctx)
 	defer cleanContainer(ctx, client, name)
 
 	suites := getSuites(ctx, client, name)
 	for suite := range suites {
 		execConfig := types.ExecConfig{
-			Cmd:          []string{"bash", "-c", "ls -1 /saunafs/tests/test_suites/" + suite + "/" + options.TestPattern + ".sh"},
+			Cmd:          []string{"bash", "-c", "ls -1 /leilfs/tests/test_suites/" + suite + "/" + options.TestPattern + ".sh"},
 			AttachStdout: true,
 			AttachStderr: false,
 		}
