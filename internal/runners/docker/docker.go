@@ -23,8 +23,12 @@ import (
 )
 
 const (
-	imageName   = "leil-test"
-	corePattern = "/tmp/temp-cores/core-%e-%p-%t"
+	imageName      = "leil-test"
+	corePattern    = "/tmp/temp-cores/core-%e-%p-%t"
+	nanoCPUsPerCPU = 1_000_000_000
+	// maxCPUCount is the largest CPU count that fits in int64 once scaled to
+	// nanoCPUs, used to guard against overflow on absurd --cpus values.
+	maxCPUCount = (1<<63 - 1) / nanoCPUsPerCPU
 )
 
 type DockerRunner struct {
@@ -173,7 +177,7 @@ func getDefaultHostConfig(options utils.TestOptions) container.HostConfig {
 					Hard: -1,
 				},
 			},
-			NanoCPUs: int64(options.CpuLimit),
+			NanoCPUs: max(0, min(int64(options.CpuLimit), maxCPUCount)) * nanoCPUsPerCPU,
 		},
 		Tmpfs: map[string]string{
 			"/mnt/ramdisk": "rw,mode=1777,size=2g",
