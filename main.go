@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
@@ -189,14 +190,14 @@ func testWorker(jobs <-chan *Test, wg *sync.WaitGroup, options utils.TestOptions
 					continue
 				}
 			} else {
-				log.Printf("Test %s finished: FAILED", job.Name)
+				log.Printf("Test %s finished: FAILED (%s)", job.Name, report.Time.Round(time.Millisecond))
 			}
 			if options.SkipTestsOnFail {
 				log.SetOutput(io.Discard)
 				job.CancelRun()
 			}
 		} else if report.Result == reports.TestSuccess {
-			log.Printf("Test %s finished: OK", job.Name)
+			log.Printf("Test %s finished: OK (%s)", job.Name, report.Time.Round(time.Millisecond))
 		}
 	}
 }
