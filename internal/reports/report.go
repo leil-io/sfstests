@@ -59,12 +59,13 @@ func (testReport *TestReport) OKResults(printAll bool) string {
 	for i, test := range testReport.Runs {
 		if test.Result == TestSuccess {
 			if len(testReport.Runs) == 1 {
-				strOutput += fmt.Sprintf("TEST %s: OK\n", test.TestName)
+				strOutput += fmt.Sprintf("TEST %s: OK (%s)\n", test.TestName, test.Time.Round(time.Millisecond))
 			} else {
-				strOutput += fmt.Sprintf("TEST %s (%v/%v): OK (FLAKY)\n",
+				strOutput += fmt.Sprintf("TEST %s (%v/%v): OK (FLAKY) (%s)\n",
 					test.TestName,
 					i+1,
 					len(testReport.Runs),
+					test.Time.Round(time.Millisecond),
 				)
 			}
 			if printAll {
@@ -85,12 +86,13 @@ func (testReport *TestReport) FailedResults(printAll bool) (string, bool) {
 	for i, test := range testReport.Runs {
 		if test.Result == TestFailed {
 			if len(testReport.Runs) == 1 {
-				strOutput += fmt.Sprintf("TEST %s: FAILED\n", test.TestName)
+				strOutput += fmt.Sprintf("TEST %s: FAILED (%s)\n", test.TestName, test.Time.Round(time.Millisecond))
 			} else {
-				strOutput += fmt.Sprintf("TEST %s (%v/%v): FAILED\n",
+				strOutput += fmt.Sprintf("TEST %s (%v/%v): FAILED (%s)\n",
 					test.TestName,
 					i+1,
 					len(testReport.Runs),
+					test.Time.Round(time.Millisecond),
 				)
 			}
 			if printAll {
