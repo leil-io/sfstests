@@ -74,7 +74,8 @@ func (runner *DockerRunner) RunTest(suite string, name string, ctx context.Conte
 
 	filter := fmt.Sprintf("%s.%s", suite, name)
 	gtestFilter := fmt.Sprintf(" --gtest_filter=%s", filter)
-	cmd := "touch /var/log/syslog; chown syslog:syslog /var/log/syslog; rsyslogd; leil-tests"
+	sudoCheck := `echo "sudo binary in use: $(readlink -f "$(command -v sudo)") ($(sudo --version | head -1))";`
+	cmd := "touch /var/log/syslog; chown syslog:syslog /var/log/syslog; rsyslogd; " + sudoCheck + " leil-tests"
 	cmd += gtestFilter
 
 	execConfig := types.ExecConfig{
